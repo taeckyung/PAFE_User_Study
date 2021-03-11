@@ -25,7 +25,8 @@ from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QPalette, QColor
 from PyQt5.QtWidgets import QMainWindow, QWidget, QFrame, QSlider, QHBoxLayout, QPushButton, \
     QVBoxLayout, QAction, QFileDialog, QApplication
-import vlc
+from utils import vlc
+
 
 class Player(QMainWindow):
     """A simple Media Player using VLC and Qt

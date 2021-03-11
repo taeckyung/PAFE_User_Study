@@ -1,0 +1,32 @@
+import cv2
+import os
+
+
+def select_camera():
+    port_list = []
+    for i in range(10):
+        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+        try:
+            success = 0
+            if cap.isOpened():
+                for _ in range(5):
+                    ret, frame = cap.read()
+                    if ret is True or frame is not None:
+                        cv2.imwrite('test.png', frame)
+                        success += 1
+                    cv2.waitKey(1)
+            if success == 5:
+                port_list.append(i)
+        finally:
+            cap.release()
+            cv2.destroyAllWindows()
+
+    try:
+        os.remove('test.png')
+    except OSError:
+        pass
+
+    if len(port_list) == 0:
+        return None
+    else:
+        return port_list[0]
