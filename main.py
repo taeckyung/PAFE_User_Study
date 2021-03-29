@@ -27,11 +27,11 @@ class SoundPlayer(Thread):
         self.output.write("%f,%s\n" % (time.time(), string))
 
     def run(self) -> None:
-        self.output = open("./output/probe.txt",'w')
+        self.output = open("./output/probe.txt", 'w')
         self.event.wait()
 
         time_before = 40000  # ms
-        while self.player.get_time() >= 0:
+        while self.player.get_position() < 0.99:
             time_now = self.player.get_time()
             if time_now - time_before >= 40000:
                 playsound.playsound("./resources/Ding-sound-effect.mp3", True)
@@ -86,6 +86,7 @@ class VideoRecorder(Process):
             if ret and frame is not None:
                 self.video_out.write(frame)
                 self.output.write("%f\n" % curr_time)
+            cv2.waitKey(1)
 
         self.video_out.release()
         self.video_cap.release()
@@ -154,6 +155,13 @@ class ExpApp(QMainWindow):
     def __init__(self, *args, **kwargs):
         QMainWindow.__init__(self, *args, **kwargs)
 
+        # Debugging options
+        self.do_calibrate = False
+
+        self.urls = ["https://www.youtube.com/watch?v=JkYVW1ZJhAI",
+                     "https://www.youtube.com/watch?v=njKP3FqW3Sk"]
+        self.urlIndex = 0
+
         self.output = open("output/main_log.txt", 'w')
         self.camera = camera.select_camera()
 
@@ -201,8 +209,6 @@ class ExpApp(QMainWindow):
         self.setWindowIcon(QIcon('resources/nmsl_logo_yellow.png'))
 
         calib_layout = QVBoxLayout(self)
-        calib_layout.setContentsMargins(0, 0, 0, 0)
-        calib_layout.setSpacing(0)
 
         self.detail_text = QLabel(
             'Thank you for your participation in this project.\n\n'
@@ -215,7 +221,7 @@ class ExpApp(QMainWindow):
         self.detail_text.setFont(QFont("Times New Roman", 15))
         self.detail_text.setStyleSheet("background-color: #FFFFFF")
         self.detail_text.setContentsMargins(10, 10, 10, 10)
-        calib_layout.addWidget(self.detail_text, 0, alignment=Qt.AlignCenter)
+        calib_layout.addWidget(self.detail_text, 0, alignment=Qt.AlignHCenter)
 
         # Start button: start the experiment
         if self.camera is not None:
@@ -226,13 +232,12 @@ class ExpApp(QMainWindow):
         self.start_button.setFixedSize(250, 125)
         self.start_button.clicked.connect(self.calibrate)
 
-        calib_layout.addWidget(self.start_button, 0, alignment=Qt.AlignCenter)
+        calib_layout.addWidget(self.start_button, 0, alignment=Qt.AlignHCenter)
+        calib_layout.setSpacing(10)
 
         self.calib_widget.setLayout(calib_layout)
 
         vlc_layout = QVBoxLayout(self)
-        vlc_layout.setContentsMargins(0, 0, 0, 0)
-        vlc_layout.setSpacing(0)
         # VLC player
         # In this widget, the video will be drawn
         if sys.platform == "darwin": # for MacOS
@@ -240,21 +245,35 @@ class ExpApp(QMainWindow):
             self.videoframe = QMacCocoaViewContainer(0)
         else:
             self.videoframe = QFrame()
-        self.palette = self.videoframe.palette()
-        self.palette.setColor (QPalette.Window,
+        palette = self.videoframe.palette()
+        palette.setColor (QPalette.Window,
                                QColor(255, 255, 255))
-        self.videoframe.setPalette(self.palette)
+        self.videoframe.setPalette(palette)
         self.videoframe.setAutoFillBackground(True)
         vlc_layout.addWidget(self.videoframe)
 
-        self.volumeslider = QSlider(Qt.Horizontal, self)
-        self.volumeslider.setMaximum(100)
-        self.volumeslider.setFixedWidth(300)
-        self.volumeslider.setValue(self.mediaplayer.audio_get_volume())
-        self.volumeslider.setToolTip("Volume")
-        self.volumeslider.valueChanged.connect(self.setVolume)
-        vlc_layout.addWidget(self.volumeslider, alignment=Qt.AlignRight)
+        vlc_lower_layout = QHBoxLayout(self)
 
+        next_button = QPushButton('Continue', self)
+        next_button.setFixedSize(100, 30)
+        next_button.clicked.connect(self.startVideo)
+        vlc_lower_layout.addWidget(next_button, alignment=Qt.AlignHCenter)
+
+        volumeslider = QSlider(Qt.Horizontal, self)
+        volumeslider.setMaximum(100)
+        volumeslider.setFixedWidth(300)
+        volumeslider.setFixedHeight(25)
+        volumeslider.setValue(self.mediaplayer.audio_get_volume())
+        volumeslider.setToolTip("Volume")
+        volumeslider.valueChanged.connect(self.setVolume)
+
+        vlc_lower_layout.addWidget(volumeslider, alignment=Qt.AlignHCenter)
+        vlc_lower_layout.setSpacing(10)
+
+        vlc_layout.addLayout(vlc_lower_layout)
+
+        vlc_layout.setSpacing(0)
+        vlc_layout.setContentsMargins(0, 0, 0, 0)
         self.vlc_widget.setLayout(vlc_layout)
 
         # Maximize the screen
@@ -291,33 +310,19 @@ class ExpApp(QMainWindow):
         else:
             self.log("Focus,True")
 
-    def startExperiment(self):
-        url = parsing.get_best_url("https://www.youtube.com/watch?v=njKP3FqW3Sk")
-        self.widget.setCurrentWidget(self.vlc_widget)
-
-        self.media = self.instance.media_new(url)
-        self.mediaplayer.set_media(self.media)
-        if sys.platform.startswith('linux'):  # for Linux using the X Server
-            self.mediaplayer.set_xwindow(self.videoframe.winId())
-        elif sys.platform == "win32":  # for Windows
-            self.mediaplayer.set_hwnd(self.videoframe.winId())
-        elif sys.platform == "darwin":  # for MacOS
-            self.mediaplayer.set_nsobject(int(self.videoframe.winId()))
-
-        self.activityRecordEvent.set()  # Start recording keyboard & mouse
-
-        self.soundPlayerEvent.set()  # Start sound player
-        if self.mediaplayer.play() < 0:  # Failed to play the media
-            self.close()
-
     def calibrate(self):
         self.log("Calibrate,%d" % self.pos)
         if self.pos >= len(self.calib_position_center):
             self.ellipse_button.hide()
-            self.startExperiment()
+            self.widget.setCurrentWidget(self.vlc_widget)
         else:
             if self.pos == 0:
-                full_screen = qApp.desktop().screenGeometry()
+                screen = qApp.primaryScreen()
+                dpi = screen.physicalDotsPerInch()
+                full_screen = screen.size()
+                x_mm = 0.0254 * full_screen.height() / dpi  # in->cm
+                y_mm = 0.0254 * full_screen.width() / dpi  # in->cm
+                self.log('Monitor,%d,%d' % (x_mm, y_mm))
                 self.log('Resolution,%d,%d' % (full_screen.width(), full_screen.height()))
                 self.log('InnerArea,%d,%d' % (self.rect().width(), self.rect().height()))
                 self.calib_r = int(min(full_screen.width(), full_screen.height()) / 100)
@@ -341,6 +346,9 @@ class ExpApp(QMainWindow):
                                      self.calib_position_center[self.pos][1] - self.calib_r)
         self.pos += 1
         self.update()
+        if not self.do_calibrate:
+            self.ellipse_button.hide()
+            self.widget.setCurrentWidget(self.vlc_widget)
 
     def paintEvent(self, event):
         qp = QPainter(self)
@@ -351,6 +359,30 @@ class ExpApp(QMainWindow):
             r = self.calib_r
             qp.drawEllipse(x-r, y-r, 2*r, 2*r)
         qp.end()
+
+    def startVideo(self):
+        if self.urlIndex == len(self.urls):
+            self.close()
+
+        url = parsing.get_best_url(self.urls[self.urlIndex])
+        self.urlIndex += 1
+        self.media = self.instance.media_new(url)
+        self.mediaplayer.set_media(self.media)
+        if sys.platform.startswith('linux'):  # for Linux using the X Server
+            self.mediaplayer.set_xwindow(self.videoframe.winId())
+        elif sys.platform == "win32":  # for Windows
+            self.mediaplayer.set_hwnd(self.videoframe.winId())
+        elif sys.platform == "darwin":  # for MacOS
+            self.mediaplayer.set_nsobject(int(self.videoframe.winId()))
+
+        self.activityRecordEvent.set()  # Start recording keyboard & mouse
+        self.soundPlayerEvent.set()  # Start sound player
+
+        if self.mediaplayer.play() < 0:  # Failed to play the media
+            self.log("Play,%s,Fail" % url)
+            return
+
+        self.log("Play,%s,Start" % url)
 
     def closeEvent(self, event):
         self.close()
