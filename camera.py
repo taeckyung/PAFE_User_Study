@@ -38,19 +38,13 @@ def cam_calibrate(cam_idx, cap, cam_calib):
         if ret:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             retc, corners = findCorners(gray)
-            print(1)
             if retc:
-                print(2)
                 calculation(gray, corners, criteria, frame_copy, ret)
-                print(3)
                 cv2.imshow('points', frame_copy)
-                print(4)
                 # s to save, c to continue, q to quit
                 if cv2.waitKey(0) & 0xFF == ord('s'):
-                    print(5)
                     img_points.append(corners)
                     obj_points.append(pts)
-                    print(6)
                     frames = frame
                 elif cv2.waitKey(0) & 0xFF == ord('c'):
                     continue

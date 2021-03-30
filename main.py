@@ -9,6 +9,7 @@ from multiprocessing import Process, Event, freeze_support
 from threading import Thread
 import traceback
 import playsound
+import random
 import signal
 import time
 import sys
@@ -18,16 +19,17 @@ from utils import vlc, parsing, camera
 
 
 class SoundPlayer(Thread):
-    def __init__(self, event: Event, player: vlc.MediaPlayer):
+    def __init__(self, event: Event, player: vlc.MediaPlayer, video: str):
         super().__init__()
         self.event = event
         self.player = player
+        self.video = video
 
     def log(self, string: str):
         self.output.write("%f,%s\n" % (time.time(), string))
 
     def run(self) -> None:
-        self.output = open("./output/probe.txt", 'w')
+        self.output = open("./output/probe_%s.txt" % self.video, 'w')
         self.event.wait()
 
         time_before = 40000  # ms
@@ -158,9 +160,15 @@ class ExpApp(QMainWindow):
         # Debugging options
         self.do_calibrate = False
 
-        self.urls = ["https://www.youtube.com/watch?v=JkYVW1ZJhAI",
-                     "https://www.youtube.com/watch?v=njKP3FqW3Sk"]
-        self.urlIndex = 0
+        self.videos = [
+            ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00"),  # 11m
+            ("Intro-to-Organizations",      "https://youtu.be/dQeqyoHQ0V4"),  # 9m
+            ("Intro-to-Economic-Theories",  "https://youtu.be/8yM_vw9xKnQ"),  # 12m
+            ("Intro-to-AI",                 "https://youtu.be/bBaZ05WsTUM"),  # 11m
+            ("Game-Theory",                 "https://youtu.be/o5vvcohd1Qg"),  # 10m
+            ("What-is-Cryptography",        "https://youtu.be/XnueMv0EUHQ")   # 15m
+        ]
+        self.videoIndex = 0
 
         self.output = open("output/main_log.txt", 'w')
         self.camera = camera.select_camera()
@@ -175,9 +183,6 @@ class ExpApp(QMainWindow):
             self.videoRecorder.start()
 
             self.activityRecordEvent = Event()
-            self.activityRecorder = ActivityRecorder(self.activityRecordEvent)
-            self.activityRecorder.daemon = True
-            self.activityRecorder.start()
         else:
             self.log("Camera not found.")
 
@@ -193,9 +198,12 @@ class ExpApp(QMainWindow):
         self.mediaplayer = self.instance.media_player_new()
 
         self.soundPlayerEvent = Event()
-        self.soundPlayer = SoundPlayer(self.soundPlayerEvent, self.mediaplayer)
-        self.soundPlayer.daemon = True
-        self.soundPlayer.start()
+
+        self.activityRecordEvent.set()  # Start recording keyboard & mouse
+
+        self.activityRecorder = ActivityRecorder(self.activityRecordEvent)
+        self.activityRecorder.daemon = True
+        self.activityRecorder.start()
 
     def initUI(self):
         self.widget = QStackedWidget(self)
@@ -223,6 +231,18 @@ class ExpApp(QMainWindow):
         self.detail_text.setContentsMargins(10, 10, 10, 10)
         calib_layout.addWidget(self.detail_text, 0, alignment=Qt.AlignHCenter)
 
+        self.type_student_id_text = QLabel('Type your STUDENT_ID below.')
+        self.type_student_id_text.setFont(QFont("Times New Roman", 15))
+        self.type_student_id_text.setContentsMargins(10, 10, 10, 10)
+        self.type_student_id_text.setFixedHeight(75)
+        calib_layout.addWidget(self.type_student_id_text, 0, alignment=Qt.AlignHCenter)
+
+        self.student_id = QLineEdit(self)
+        self.student_id.setFixedSize(250, 75)
+        self.student_id.setAlignment(Qt.AlignCenter)
+        self.student_id.setValidator(QIntValidator())
+        calib_layout.addWidget(self.student_id, 0, alignment=Qt.AlignHCenter)
+
         # Start button: start the experiment
         if self.camera is not None:
             self.start_button = QPushButton('Start\n(Please wait after click)', self)
@@ -246,15 +266,14 @@ class ExpApp(QMainWindow):
         else:
             self.videoframe = QFrame()
         palette = self.videoframe.palette()
-        palette.setColor (QPalette.Window,
-                               QColor(255, 255, 255))
+        palette.setColor(QPalette.Window, QColor(255, 255, 255))
         self.videoframe.setPalette(palette)
         self.videoframe.setAutoFillBackground(True)
         vlc_layout.addWidget(self.videoframe)
 
         vlc_lower_layout = QHBoxLayout(self)
 
-        next_button = QPushButton('Continue', self)
+        next_button = QPushButton('Start Video', self)
         next_button.setFixedSize(100, 30)
         next_button.clicked.connect(self.startVideo)
         vlc_lower_layout.addWidget(next_button, alignment=Qt.AlignHCenter)
@@ -317,22 +336,37 @@ class ExpApp(QMainWindow):
             self.widget.setCurrentWidget(self.vlc_widget)
         else:
             if self.pos == 0:
+                if self.student_id.text() == "":
+                    return
+
                 screen = qApp.primaryScreen()
                 dpi = screen.physicalDotsPerInch()
                 full_screen = screen.size()
                 x_mm = 0.0254 * full_screen.height() / dpi  # in->cm
                 y_mm = 0.0254 * full_screen.width() / dpi  # in->cm
+                self.calib_r = int(min(full_screen.width(), full_screen.height()) / 100)
+                self.margin = self.calib_r + 10
+
+                # Leave logs
+                self.log('StudentId,%s' % (self.student_id.text()))
                 self.log('Monitor,%d,%d' % (x_mm, y_mm))
                 self.log('Resolution,%d,%d' % (full_screen.width(), full_screen.height()))
                 self.log('InnerArea,%d,%d' % (self.rect().width(), self.rect().height()))
-                self.calib_r = int(min(full_screen.width(), full_screen.height()) / 100)
-                self.margin = self.calib_r + 10
                 self.log('Calibration_Radius,%d' % self.calib_r)
 
+                # Sort URL w.r.t. Student ID
+                random.seed(self.student_id.text())
+                random.shuffle(self.videos)
+
+                # Start recording
                 self.videoRecordEvent.set()
                 time.sleep(3.0)
+
+                self.type_student_id_text.hide()
                 self.start_button.hide()
                 self.detail_text.hide()
+                self.student_id.hide()
+
                 self.ellipse_button.setFixedSize(self.calib_r*2, self.calib_r*2)
                 self.ellipse_button.show()
                 self.calib_position_center = [
@@ -342,6 +376,7 @@ class ExpApp(QMainWindow):
                     (self.rect().width()/2, self.margin), (self.rect().width() - self.margin, self.rect().height()/2),
                     (self.rect().width()/2, self.rect().height() - self.margin), (self.margin, self.rect().height()/2)
                 ]
+
             self.ellipse_button.move(self.calib_position_center[self.pos][0] - self.calib_r,
                                      self.calib_position_center[self.pos][1] - self.calib_r)
         self.pos += 1
@@ -361,28 +396,46 @@ class ExpApp(QMainWindow):
         qp.end()
 
     def startVideo(self):
-        if self.urlIndex == len(self.urls):
-            self.close()
-
-        url = parsing.get_best_url(self.urls[self.urlIndex])
-        self.urlIndex += 1
-        self.media = self.instance.media_new(url)
-        self.mediaplayer.set_media(self.media)
-        if sys.platform.startswith('linux'):  # for Linux using the X Server
-            self.mediaplayer.set_xwindow(self.videoframe.winId())
-        elif sys.platform == "win32":  # for Windows
-            self.mediaplayer.set_hwnd(self.videoframe.winId())
-        elif sys.platform == "darwin":  # for MacOS
-            self.mediaplayer.set_nsobject(int(self.videoframe.winId()))
-
-        self.activityRecordEvent.set()  # Start recording keyboard & mouse
-        self.soundPlayerEvent.set()  # Start sound player
-
-        if self.mediaplayer.play() < 0:  # Failed to play the media
-            self.log("Play,%s,Fail" % url)
+        if self.videoIndex > 0 and self.mediaplayer.get_position() < 0.95:
             return
 
-        self.log("Play,%s,Start" % url)
+        if self.videoIndex >= len(self.videos):  # Finish
+            self.soundPlayer.terminate()
+            self.soundPlayer.join()
+            self.close()
+        elif self.videoIndex == 0:  # First video
+            self.activityRecordEvent.set()  # Start recording keyboard & mouse
+        else:
+            self.soundPlayer.terminate()
+            self.soundPlayer.join()
+
+        self.soundPlayerEvent.clear()
+        self.soundPlayer = SoundPlayer(self.soundPlayerEvent, self.mediaplayer, self.videos[self.videoIndex][0])
+        self.soundPlayer.daemon = True
+        self.soundPlayer.start()
+
+        print(self.videos)
+        url = parsing.get_best_url(self.videos[self.videoIndex][1])
+        print(url)
+        try:
+            self.media = self.instance.media_new(url)
+            self.mediaplayer.set_media(self.media)
+            if sys.platform.startswith('linux'):  # for Linux using the X Server
+                self.mediaplayer.set_xwindow(self.videoframe.winId())
+            elif sys.platform == "win32":  # for Windows
+                self.mediaplayer.set_hwnd(self.videoframe.winId())
+            elif sys.platform == "darwin":  # for MacOS
+                self.mediaplayer.set_nsobject(int(self.videoframe.winId()))
+            self.soundPlayerEvent.set()  # Start sound player
+
+            if self.mediaplayer.play() < 0:  # Failed to play the media
+                self.log("Play,%s,Fail" % self.videos[self.videoIndex][0])
+            else:
+                self.log("Play,%s,Start" % self.videos[self.videoIndex][0])
+        except Exception:
+            self.log("Play,%s,Fail" % self.videos[self.videoIndex][0])
+        finally:
+            self.videoIndex += 1
 
     def closeEvent(self, event):
         self.close()
