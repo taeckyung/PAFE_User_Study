@@ -2,7 +2,7 @@ import cv2
 import os
 
 
-def select_camera():
+def select_camera(path="test.png"):
     port_list = []
     for i in range(10):
         cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
@@ -12,7 +12,7 @@ def select_camera():
                 for _ in range(5):
                     ret, frame = cap.read()
                     if ret is True or frame is not None:
-                        cv2.imwrite('test.png', frame)
+                        cv2.imwrite(path, frame)
                         success += 1
                     cv2.waitKey(1)
             if success == 5:
@@ -22,7 +22,7 @@ def select_camera():
             cv2.destroyAllWindows()
 
     try:
-        os.remove('test.png')
+        os.remove(path)
     except OSError:
         pass
 

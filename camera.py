@@ -53,7 +53,7 @@ def cam_calibrate(cam_idx, cap, cam_calib):
                     cv2.destroyAllWindows()
                     break
 
-    # compute calibration matricesqq
+    # compute calibration matrices
 
     if frames is None:
         return
