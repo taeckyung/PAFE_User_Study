@@ -28,16 +28,19 @@ def getTime(time_now, total):
     return time_now//60, time_now % 60, total//60, total % 60
 
 
-class UIUpdater(Thread):
+class UIUpdater(QThread):
+    signal = pyqtSignal()
+
     def __init__(self, player: vlc.MediaPlayer, time_label: QLabel, time_text: str, next_button: QPushButton,
-                 video_frame: QFrame):
+                 is_end=False, end_funtion=None):
         super().__init__()
         self.event = Event()
         self.player = player
         self.time_text = time_text
         self.time_label = time_label
         self.next_button = next_button
-        self.video_frame = video_frame
+        self.is_end = is_end
+        self.end_function = end_funtion
 
     def execute(self):
         self.event.set()
@@ -47,14 +50,22 @@ class UIUpdater(Thread):
 
     def run(self) -> None:
         self.event.wait()
+
         while self.player.get_state() != vlc.State(3):
             time.sleep(0.1)
         total_length = self.player.get_length() // 1000
 
-        while self.player.get_state() != vlc.State(6) and self.event.is_set():
+        while True:
+            try:
+                if not (self.player.get_state() != vlc.State(6) and self.event.is_set()):
+                    break
+            except Exception as e:
+                print(str(e))
+                break
+
             time_now = self.player.get_time()
             self.time_label.setText(self.time_text % getTime(int(time_now / 1000), total_length))
-            time.sleep(0.49)
+            time.sleep(0.2)
 
         self.player.stop()
         self.player.release()
@@ -62,57 +73,86 @@ class UIUpdater(Thread):
         self.next_button.setEnabled(True)
         self.time_label.setText(self.time_text % (0, 0, 0, 0))
 
+        if self.is_end:
+            self.signal.emit()
 
-class ProbeRunner(Thread):
-    def __init__(self, queue: SimpleQueue, player: vlc.MediaPlayer, video: str):
+
+class ProbeRunner(QThread):
+    signal = pyqtSignal()
+
+    def __init__(self, queue: SimpleQueue, player: vlc.MediaPlayer, video: str, is_demo=False):
         super().__init__()
         self.event = Event()
+        self.end_event = Event()
         self.queue = queue
         self.player = player
         self.video = video
+        self.is_demo: bool = is_demo
 
     def execute(self):
         self.event.set()
 
     def finish(self, timeout=None):
         self.event.clear()
-        self.event.wait(timeout=timeout)
+        self.end_event.wait(timeout=timeout)
 
     def run(self) -> None:
         output = open("./output/probe_%s.txt" % self.video, 'w')
-        self.event.wait()
-        while self.player.get_state() != vlc.State(3):
-            time.sleep(0.1)
 
-        padding = 5000  # ms
-        interval = 5000  # ms
+        self.event.wait()
+
+        padding = 10000  # ms
+        interval = 40000  # ms
+        max_response = 10  # s
 
         clock_before = 0
         idx_before = 0
 
         output_str = ""
+        last_probe = None
+        added = True
 
-        while self.player.get_state() != vlc.State(6) and self.event.is_set():
+        while self.player.get_state() != vlc.State(3):
+            time.sleep(0.1)
+
+        while True:
+            try:
+                if not (self.player.is_playing() and self.player.get_state() != vlc.State(6) and self.event.is_set()):
+                    break
+            except Exception as e:
+                output.write(str(e) + '\n')
+                break
+
             time_now = self.player.get_time()
             clock_now = time.time()
 
+            # Play ding sound
             if (time_now - padding) // interval > idx_before:
                 playsound.playsound("./resources/Ding-sound-effect.mp3", True)
                 output_str += "%f,%f,sound\n" % (time_now, clock_now)
                 idx_before += 1
                 clock_before = clock_now
+                last_probe = None
+                added = False
 
-            last_probe = None
+            # Check demo: Alert if no probing in 10 sec
+            if self.is_demo and (last_probe is None) and (not added) and (clock_now - clock_before >= max_response):
+                self.signal.emit()
+                added = True
+
             while not self.queue.empty():
                 e: Tuple[float, str] = self.queue.get()
-                if -0. <= e[0] - clock_before < 10000.:  # Response in 10s
+                if 0. <= e[0] - clock_before < max_response:
                     last_probe = e
-            if last_probe is not None:
+            if last_probe is not None and not added:
                 output_str += "%f,%f,probe,%s\n" % (time_now, last_probe[0], last_probe[1])
+                added = True
+
+            time.sleep(0.1)
 
         output.write(output_str)
         output.close()
-        self.event.set()
+        self.end_event.set()
 
 
 class VideoRecorder(Process):
@@ -222,8 +262,10 @@ class ActivityRecorder(Process):
         if isinstance(key, keyboard.KeyCode):
             if key == keyboard.KeyCode.from_char('y'):
                 self.queue.put((curr_time, 'y'))
+                playsound.playsound("./resources/Keyboard.mp3", True)
             elif key == keyboard.KeyCode.from_char('n'):
                 self.queue.put((curr_time, 'n'))
+                playsound.playsound("./resources/Keyboard.mp3", True)
 
     def run(self) -> None:
         self.output = open("output/activity_log_%s.txt" % self.name, 'w')
@@ -258,17 +300,17 @@ class ActivityRecorder(Process):
 
 def proceedFunction(state_before, state_after):
     """
-    These functions will be called through function `proceed`.
+    These functions will call function `proceed`.
 
-    :param state_before:
     :param state_after:
+    :param state_before:
     :return:
     """
     def proceedFunction(func):
         @functools.wraps(func)
-        def wrapper(self):
-            assert(self._state == state_before)
-            func(self)
+        def wrapper(self, *args, **kwargs):
+            assert(self._state == state_before or self._state in state_before)
+            func(self, *args, **kwargs)
             if state_after is not None:
                 self._state = state_after
                 self.proceed()
@@ -277,6 +319,36 @@ def proceedFunction(state_before, state_after):
 
 
 class ExpApp(QMainWindow):
+
+    class ProbingDialog(QDialog):
+        def __init__(self, probe_text, closeDialog):
+            super().__init__()
+            self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+            dialog_layout = QVBoxLayout(self)
+            self.label = QLabel("Did you hear the beep sound?\n"
+                               "After hearing the sound, you should response your attentional state!\n\n"
+                               + probe_text + "\n\n"
+                               "You can check this guide below.")
+            self.label.setAlignment(Qt.AlignCenter)
+            self.button = QPushButton("OK")
+
+            dialog_layout.addStretch(1)
+            dialog_layout.addWidget(self.label, alignment=Qt.AlignVCenter)
+            dialog_layout.addStretch(1)
+            dialog_layout.addWidget(self.button, alignment=Qt.AlignVCenter)
+            dialog_layout.addStretch(1)
+            self.setLayout(dialog_layout)
+            self.setWindowTitle('Alert')
+            self.setWindowModality(Qt.ApplicationModal)
+            self.closeDialog = closeDialog
+
+        def connect(self, f):
+            self.button.clicked.connect(f)
+
+        def closeEvent(self, a0: QCloseEvent) -> None:
+            self.closeDialog()
+            return super().closeEvent(a0)
 
     class State(Enum):
         START = 0
@@ -292,6 +364,8 @@ class ExpApp(QMainWindow):
     _state = State.START
 
     def signal_handler(self, sig, frame):
+        if sig == signal.SIGINT:
+            traceback.print_stack(frame)
         self.close()
 
     def log(self, string: str):
@@ -316,13 +390,56 @@ class ExpApp(QMainWindow):
                 qp.drawEllipse(x-r, y-r, 2*r, 2*r)
         qp.end()
 
+    def closeEvent(self, event):
+        self.log("click,x")
+        self.close()
+
+    def close(self):
+        try:
+            self.media_player.stop()
+        except Exception as e:
+            self.log(str(e))
+
+        try:
+            self.videoRecorder.finish(timeout=5.0)
+            self.activityRecorder.finish(timeout=5.0)
+        except Exception as e:
+            self.log(str(e))
+
+        try:
+            self.probeRunner.finish(timeout=5.0)
+            self.probeRunner.terminate()
+        except Exception as e:
+            self.log(str(e))
+
+        try:
+            self.videoRecorder.join(timeout=2.0)
+            self.videoRecorder.terminate()
+        except Exception as e:
+            self.log(str(e))
+
+        try:
+            self.activityRecorder.join(timeout=2.0)
+            self.activityRecorder.terminate()
+        except Exception as e:
+            self.log(str(e))
+
+        try:
+            shutil.make_archive(os.path.join("./", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
+        except Exception as e:
+            self.log(str(e))
+
+        self.output.close()
+        exit(0)
+
     def __init__(self, *args, **kwargs):
         QMainWindow.__init__(self, *args, **kwargs)
 
         # Debugging options
-        self.do_calibrate = False
+        self.do_calibrate = True
 
         self.videos = [
+            # ("10-Second-Timer", "https://www.youtube.com/watch?v=61QSHrOuGEA"),
             ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00"),  # 11m; pre-video
             ("Intro-to-Forensic-Science",   "https://youtu.be/FmPBNPFwiws"),  # 12m
             ("Intro-to-Economic-Theories",  "https://youtu.be/8yM_vw9xKnQ"),  # 12m
@@ -347,7 +464,7 @@ class ExpApp(QMainWindow):
             :return:
             """
             self.instance = vlc.Instance()
-            self.media_player = self.instance.media_player_new()
+            self.media_player: vlc.MediaPlayer = self.instance.media_player_new()
 
         # initChild
         if True:
@@ -373,10 +490,14 @@ class ExpApp(QMainWindow):
             self.instruction_widget = QWidget(self)
             self.calibration_widget = QWidget(self)
             self.vlc_widget = QWidget(self)
+            self.finish_widget = QWidget(self)
+
             self.widget.addWidget(self.instruction_widget)
             self.widget.addWidget(self.camera_widget)
             self.widget.addWidget(self.calibration_widget)
             self.widget.addWidget(self.vlc_widget)
+            self.widget.addWidget(self.finish_widget)
+
             self.setCentralWidget(self.widget)
             self.widget.setCurrentWidget(self.instruction_widget)
 
@@ -426,7 +547,10 @@ class ExpApp(QMainWindow):
                     'During the experiment, PLEASE AVOID MOVING LAPTOP or TOUCHING EYEGLASSES.',
                     self
                 )
-                self.detail_text.setFont(QFont("Times New Roman", 15))
+                font: QFont = self.detail_text.font()
+                font.setPixelSize(15)
+                font.setBold(True)
+                self.detail_text.setFont(font)
                 self.detail_text.setStyleSheet("background-color: #FFFFFF")
                 self.detail_text.setContentsMargins(10, 10, 10, 10)
                 instruction_layout.addWidget(self.detail_text, 0, alignment=Qt.AlignHCenter)
@@ -551,22 +675,30 @@ class ExpApp(QMainWindow):
                 self.vlc_widget.setLayout(vlc_layout)
 
                 # Dialog
-                self.dialog = QDialog()
-                dialog_layout = QVBoxLayout(self.dialog)
-                label = QLabel("Did you hear the beep sound?\n"
-                               "After hearing the sound, you should response your attentional state!\n\n"
-                               + self.probe_text + "\n\n"
-                               "You can check this at the bottom center.")
-                label.setAlignment(Qt.AlignCenter)
-                button = QPushButton("OK")
-                button.clicked.connect(self.closeDialog)
+                self.dialog = self.ProbingDialog(self.probe_text, self.closeDialog)
+                self.dialog.connect(self.closeDialog)
 
-                dialog_layout.addStretch(1)
-                dialog_layout.addWidget(label, alignment=Qt.AlignVCenter)
-                dialog_layout.addStretch(1)
-                dialog_layout.addWidget(button, alignment=Qt.AlignVCenter)
-                dialog_layout.addStretch(1)
-                self.dialog.setLayout(dialog_layout)
+            # Finish scene
+            if True:
+                finish_layout = QVBoxLayout(self)
+                self.finish_text = 'Thank you for the participation!\n'\
+                                   'Please do not forget to submit the result :)\n\n'\
+                                   'Your PARTICIPANT_ID is [%s]'
+                self.finish_label = QLabel(self.finish_text)
+                self.finish_label.setAlignment(Qt.AlignCenter)
+                self.finish_label.setFixedHeight(200)
+                font: QFont = self.finish_label.font()
+                font.setBold(True)
+                font.setPixelSize(30)
+                self.finish_label.setFont(font)
+                finish_layout.addWidget(self.finish_label, alignment=Qt.AlignHCenter)
+
+                finish_button = QPushButton('Finish\n(Please Wait)', self)
+                finish_button.setFixedSize(400, 100)
+                finish_button.clicked.connect(self.close)
+                finish_layout.addWidget(finish_button, alignment=Qt.AlignHCenter)
+
+                self.finish_widget.setLayout(finish_layout)
 
             # Maximize the screen
             self.showMaximized()
@@ -597,12 +729,12 @@ class ExpApp(QMainWindow):
             self.set_monitor()
         elif self._state is self.State.CALIBRATION:
             self.calibrate()
-        elif self._state is self.State.DEMO_VIDEO:  # TODO
-            raise NotImplementedError
+        elif self._state is self.State.DEMO_VIDEO:
+            self.startVideo(demo=True)
         elif self._state is self.State.MAIN_VIDEO:
-            self.startMainVideo()
-        elif self._state is self.State.FINISH:  # TODO
-            raise NotImplementedError
+            self.startVideo()
+        elif self._state is self.State.FINISH:
+            self.final()
 
     @proceedFunction(State.INSTRUCTION, State.INITIALIZE)
     def set_instruction(self):
@@ -722,37 +854,34 @@ class ExpApp(QMainWindow):
         frame_thread.daemon = True
         frame_thread.start()
 
-        @proceedFunction(self.State.SET_MONITOR, self.State.CALIBRATION)
-        def camera_finished():
-            self.camera_running.set()
+        def camera_finished_wrapper():
+            self.camera_finished(frame_thread, cap)
 
-            frame_thread.join()
-            cap.release()
+        self.camera_finish_button.clicked.connect(camera_finished_wrapper)
 
-            # Start recording
-            self.videoRecorder = VideoRecorder(self.camera)
-            self.videoRecorder.daemon = True
-            self.videoRecorder.start()
-            self.videoRecorder.execute()
+    @proceedFunction(State.SET_MONITOR, State.CALIBRATION)
+    def camera_finished(self, frame_thread, cap):
+        self.camera_running.set()
 
-            self.widget.setCurrentWidget(self.calibration_widget)
+        frame_thread.join()
+        cap.release()
 
-            time.sleep(1.5)
+        # Start recording
+        self.videoRecorder = VideoRecorder(self.camera)
+        self.videoRecorder.daemon = True
+        self.videoRecorder.start()
+        self.videoRecorder.execute()
 
-        self.camera_finish_button.clicked.connect(camera_finished)
+        self.widget.setCurrentWidget(self.calibration_widget)
 
     @proceedFunction(State.CALIBRATION, None)  # Calibrate will proceed when done
     def calibrate(self):
         self.log("calibrate,%d" % self.pos)
 
-        @proceedFunction(self.State.CALIBRATION, self.State.MAIN_VIDEO)
-        def startVideo():
-            return
-
         if self.pos >= len(self.calib_position_center):
             self.ellipse_button.hide()
             self.widget.setCurrentWidget(self.vlc_widget)
-            startVideo()
+            self._state = self.State.DEMO_VIDEO
             return
         else:
             self.ellipse_button.move(self.calib_position_center[self.pos][0] - self.calib_r,
@@ -762,36 +891,33 @@ class ExpApp(QMainWindow):
             self.pos = len(self.calib_position_center) + 1
             self.ellipse_button.hide()
             self.widget.setCurrentWidget(self.vlc_widget)
-            startVideo()
+            self._state = self.State.DEMO_VIDEO
         else:
             self.pos += 1
             self.update()
 
-    def closeDialog(self):
-        self.dialog.close()
-
-    def alertProbing(self):
-        self.dialog.setWindowTitle('Alert')
-        self.dialog.setWindowModality(Qt.ApplicationModal)
+    def showDialog(self):
+        self.media_player.pause()
         self.dialog.show()
 
-    @proceedFunction(State.MAIN_VIDEO, None)  # TODO: Implement End.
-    def startMainVideo(self):
+    def closeDialog(self):
+        self.dialog.close()
+        self.media_player.play()
+
+    @proceedFunction([State.DEMO_VIDEO, State.MAIN_VIDEO], None)
+    def startVideo(self, demo=False):
+        assert(self.videoIndex == 0 or not demo)
+
         self.next_button.setDisabled(True)
 
-        if self.videoIndex > 0 and self.media_player.get_position() < 0.90:
-            self.next_button.setEnabled(True)
+        if self.videoIndex >= len(self.videos):  # Finish (includes probeRunner cleanup)
+            self.finishVideo()
             return
 
-        if self.videoIndex == 0:  # First video
-            self.alertProbing()
-            pass
-        else:
+        if self.videoIndex != 0:
             self.probeRunner.finish(timeout=15.0)
-            self.probeRunner.join()
-            self.updater.join()
-            if self.videoIndex >= len(self.videos):  # Finish
-                self.close()
+            self.probeRunner.terminate()
+            self.updater.terminate()
 
         self.activityRecorder.finish(timeout=5.0)  # Stop recording keyboard & mouse
         self.activityRecorder.join()
@@ -800,13 +926,17 @@ class ExpApp(QMainWindow):
         self.activityRecorder.daemon = True
         self.activityRecorder.start()
 
-        self.probeRunner = ProbeRunner(self.probeQueue, self.media_player, self.videos[self.videoIndex][0])
+        self.probeRunner = ProbeRunner(self.probeQueue, self.media_player, self.videos[self.videoIndex][0], demo)
         self.probeRunner.daemon = True
         self.probeRunner.start()
+        # self.dialog.moveToThread(self.probeRunner)  # You should move before connecting the signal
+        self.probeRunner.signal.connect(self.showDialog)
 
-        self.updater = UIUpdater(self.media_player, self.time_label, self.time_text, self.next_button, self.video_frame)
+        self.updater = UIUpdater(self.media_player, self.time_label, self.time_text, self.next_button,
+                                 is_end=self.videoIndex == len(self.videos)-1)
         self.updater.daemon = True
         self.updater.start()
+        self.updater.signal.connect(self.finishVideo)
 
         url = parsing.get_best_url(self.videos[self.videoIndex][1])
         self.log("url,%s" % url)
@@ -832,49 +962,19 @@ class ExpApp(QMainWindow):
             self.log("play,%s,Fail,%s" % (self.videos[self.videoIndex][0], str(e)))
         finally:
             self.videoIndex += 1
+            self._state = self.State.MAIN_VIDEO
             self.video_index_label.setText(self.video_index_text % (self.videoIndex, len(self.videos)))
 
-    def closeEvent(self, event):
-        self.log("click,x")
-        self.close()
+    @proceedFunction(State.MAIN_VIDEO, State.FINISH)
+    def finishVideo(self):
+        self.probeRunner.finish(timeout=15.0)
+        self.probeRunner.terminate()
+        self.updater.terminate()
+        return
 
-    def close(self):
-        try:
-            self.media_player.stop()
-        except Exception as e:
-            self.log(str(e))
-
-        try:
-            self.videoRecorder.finish(timeout=5.0)
-            self.activityRecorder.finish(timeout=5.0)
-        except Exception as e:
-            self.log(str(e))
-
-        try:
-            self.probeRunner.finish(timeout=5.0)
-            self.probeRunner.join(timeout=1.0)
-        except Exception as e:
-            self.log(str(e))
-
-        try:
-            self.videoRecorder.join(timeout=2.0)
-            self.videoRecorder.terminate()
-        except Exception as e:
-            self.log(str(e))
-
-        try:
-            self.activityRecorder.join(timeout=2.0)
-            self.activityRecorder.terminate()
-        except Exception as e:
-            self.log(str(e))
-
-        try:
-            shutil.make_archive(os.path.join("./", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
-        except Exception as e:
-            self.log(str(e))
-
-        self.output.close()
-        exit(0)
+    def final(self):
+        self.finish_label.setText(self.finish_text % self.user_id.text())
+        self.widget.setCurrentWidget(self.finish_widget)
 
 
 if __name__ == '__main__':
