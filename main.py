@@ -9,9 +9,8 @@ import cv2
 
 from multiprocessing import Process, Event, freeze_support, SimpleQueue
 from threading import Thread
-from enum import Enum
+from enum import Enum, auto
 import traceback
-import playsound
 import shutil
 import random
 import signal
@@ -21,7 +20,7 @@ import os
 
 from typing import List, Tuple
 
-from utils import vlc, parsing, camera
+from utils import vlc, parsing, camera, sound, notification
 
 
 def getTime(time_now, total):
@@ -31,22 +30,32 @@ def getTime(time_now, total):
 class UIUpdater(QThread):
     signal = pyqtSignal()
 
-    def __init__(self, player: vlc.MediaPlayer, time_label: QLabel, time_text: str, next_button: QPushButton,
-                 is_end=False, end_funtion=None):
+    def __init__(self, frame: QFrame, player: vlc.MediaPlayer, time_label: QLabel, time_text: str,
+                 video_label: QLabel, video_text: str, next_button: QPushButton,
+                 quiz_url: str, is_end=False):
         super().__init__()
         self.event = Event()
+        self.probeEvent = Event()
+        self.closeEvent = Event()
+        self.frame = frame
         self.player = player
         self.time_text = time_text
         self.time_label = time_label
+        self.video_text = video_text
+        self.video_label = video_label
         self.next_button = next_button
+        self.quiz_url = quiz_url
         self.is_end = is_end
-        self.end_function = end_funtion
 
     def execute(self):
         self.event.set()
 
     def finish(self, timeout=None):
-        pass
+        self.event.clear()
+        self.closeEvent.wait(timeout)
+
+    def alertProbeRunnerFinished(self):
+        self.probeEvent.set()
 
     def run(self) -> None:
         self.event.wait()
@@ -60,25 +69,31 @@ class UIUpdater(QThread):
                 if not (self.player.get_state() != vlc.State(6) and self.event.is_set()):
                     break
             except Exception as e:
-                print(str(e))
+                print(str(e), flush=True)
                 break
 
             time_now = self.player.get_time()
             self.time_label.setText(self.time_text % getTime(int(time_now / 1000), total_length))
             time.sleep(0.2)
 
-        self.player.stop()
+        # Wait for ProbeRunner
+        self.probeEvent.wait()
         self.player.release()
 
-        self.next_button.setEnabled(True)
+        self.video_label.setText(self.video_text)
         self.time_label.setText(self.time_text % (0, 0, 0, 0))
+        if self.event.is_set():  # Normal ending with video finished
+            os.system(f"start {self.quiz_url}")
+        self.next_button.setEnabled(True)
 
         if self.is_end:
             self.signal.emit()
+        self.closeEvent.set()
 
 
 class ProbeRunner(QThread):
     signal = pyqtSignal()
+    ui_signal = pyqtSignal()
 
     def __init__(self, queue: SimpleQueue, player: vlc.MediaPlayer, video: str, is_demo=False):
         super().__init__()
@@ -101,7 +116,7 @@ class ProbeRunner(QThread):
 
         self.event.wait()
 
-        padding = 10000  # ms
+        padding = 0  # ms
         interval = 40000  # ms
         max_response = 10  # s
 
@@ -128,7 +143,7 @@ class ProbeRunner(QThread):
 
             # Play ding sound
             if (time_now - padding) // interval > idx_before:
-                playsound.playsound("./resources/Ding-sound-effect.mp3", True)
+                sound.play("./resources/Ding-sound-effect.mp3")
                 output_str += "%f,%f,sound\n" % (time_now, clock_now)
                 idx_before += 1
                 clock_before = clock_now
@@ -150,6 +165,7 @@ class ProbeRunner(QThread):
 
             time.sleep(0.1)
 
+        self.ui_signal.emit()
         output.write(output_str)
         output.close()
         self.end_event.set()
@@ -262,10 +278,10 @@ class ActivityRecorder(Process):
         if isinstance(key, keyboard.KeyCode):
             if key == keyboard.KeyCode.from_char('y'):
                 self.queue.put((curr_time, 'y'))
-                playsound.playsound("./resources/Keyboard.mp3", True)
+                sound.play("./resources/Keyboard.mp3")
             elif key == keyboard.KeyCode.from_char('n'):
                 self.queue.put((curr_time, 'n'))
-                playsound.playsound("./resources/Keyboard.mp3", True)
+                sound.play("./resources/Keyboard.mp3")
 
     def run(self) -> None:
         self.output = open("output/activity_log_%s.txt" % self.name, 'w')
@@ -351,15 +367,16 @@ class ExpApp(QMainWindow):
             return super().closeEvent(a0)
 
     class State(Enum):
-        START = 0
-        INITIALIZE = 1
-        INSTRUCTION = 2
-        SET_MONITOR = 3
-        CALIBRATION = 4
-        DEMO_VIDEO = 5
-        MAIN_VIDEO = 6
-        FINISH = 7
-        ERROR = -1
+        START = auto()
+        INITIALIZE = auto()
+        INSTRUCTION = auto()
+        SET_NOTIFICATION = auto()
+        SET_MONITOR = auto()
+        CALIBRATION = auto()
+        DEMO_VIDEO = auto()
+        MAIN_VIDEO = auto()
+        FINISH = auto()
+        ERROR = auto()
 
     _state = State.START
 
@@ -369,7 +386,7 @@ class ExpApp(QMainWindow):
         self.close()
 
     def log(self, string: str):
-        print(string)
+        print(string, flush=True)
         self.output.write("%f,%s,%s\n" % (time.time(), self._state, string))
 
     @pyqtSlot("QWidget*", "QWidget*")
@@ -397,6 +414,14 @@ class ExpApp(QMainWindow):
     def close(self):
         try:
             self.media_player.stop()
+        except Exception as e:
+            self.log(str(e))
+
+        try:
+            self.probeRunner.finish(timeout=5.0)
+            self.probeRunner.terminate()
+            self.updater.finish(timeout=1.0)
+            self.updater.terminate()
         except Exception as e:
             self.log(str(e))
 
@@ -430,22 +455,25 @@ class ExpApp(QMainWindow):
             self.log(str(e))
 
         self.output.close()
+        # taskbar.unhide_taskbar()
         exit(0)
 
     def __init__(self, *args, **kwargs):
         QMainWindow.__init__(self, *args, **kwargs)
 
+        # taskbar.hide_taskbar()
+
         # Debugging options
         self.do_calibrate = True
 
         self.videos = [
-            # ("10-Second-Timer", "https://www.youtube.com/watch?v=61QSHrOuGEA"),
-            ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00"),  # 11m; pre-video
-            ("Intro-to-Forensic-Science",   "https://youtu.be/FmPBNPFwiws"),  # 12m
-            ("Intro-to-Economic-Theories",  "https://youtu.be/8yM_vw9xKnQ"),  # 12m
-            ("Intro-to-AI",                 "https://youtu.be/bBaZ05WsTUM"),  # 11m
-            ("Game-Theory",                 "https://youtu.be/o5vvcohd1Qg"),  # 10m
-            ("What-is-Cryptography",        "https://youtu.be/XnueMv0EUHQ")   # 15m
+            # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
+            ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00", "https://forms.gle/fsq9JoA3uQW1XVsL8"),  # 11m; pre-video
+            ("Intro-to-Forensic-Science",   "https://youtu.be/FmPBNPFwiws", "https://forms.gle/DBgafv1NRG6PbRuh8"),  # 12m
+            ("Intro-to-Economic-Theories",  "https://youtu.be/8yM_vw9xKnQ", "https://forms.gle/BL1siLNCM5WaaLWm8"),  # 12m
+            ("AI-For-Everyone",             "https://youtu.be/bBaZ05WsTUM", "https://forms.gle/1cLrxunMHAXBktVL8"),  # 11m
+            ("Game-Theory",                 "https://youtu.be/o5vvcohd1Qg", "https://forms.gle/83ixrQgC86xczpfV8"),  # 10m
+            ("Cryptography-I",              "https://youtu.be/XnueMv0EUHQ", "https://forms.gle/t28mL8xmZSabigSe9")   # 15m
         ]
         self.videoIndex = 0
 
@@ -457,6 +485,10 @@ class ExpApp(QMainWindow):
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
 
+        self.small_font = QFont("Roboto")
+        self.small_font.setPixelSize(13)
+        self.small_font.setBold(False)
+
         # initVLC
         if True:
             """
@@ -464,7 +496,7 @@ class ExpApp(QMainWindow):
             :return:
             """
             self.instance = vlc.Instance()
-            self.media_player: vlc.MediaPlayer = self.instance.media_player_new()
+            self.media_player: vlc.MediaPlayer = None
 
         # initChild
         if True:
@@ -486,15 +518,17 @@ class ExpApp(QMainWindow):
             self.setWindowIcon(QIcon('resources/nmsl_logo_yellow.png'))
 
             self.widget = QStackedWidget(self)
-            self.camera_widget = QWidget(self)
             self.instruction_widget = QWidget(self)
+            self.camera_widget = QWidget(self)
+            self.notification_widget = QWidget(self)
             self.calibration_widget = QWidget(self)
             self.vlc_widget = QWidget(self)
             self.finish_widget = QWidget(self)
 
             self.widget.addWidget(self.instruction_widget)
-            self.widget.addWidget(self.camera_widget)
             self.widget.addWidget(self.calibration_widget)
+            self.widget.addWidget(self.camera_widget)
+            self.widget.addWidget(self.notification_widget)
             self.widget.addWidget(self.vlc_widget)
             self.widget.addWidget(self.finish_widget)
 
@@ -505,20 +539,18 @@ class ExpApp(QMainWindow):
             if True:
                 camera_layout = QVBoxLayout(self)
                 camera_text = QLabel(
-                    'Please move your monitor/laptop to make face larger than the rectangle.', self
+                    'Please move your monitor/laptop closer to make face FIT LARGER than the rectangle.\n\n'
+                    'Please avoid direct lights into the camera.'
+                    , self
                 )
                 camera_text.setAlignment(Qt.AlignCenter)
-                camera_text.setFixedHeight(30)
-                font: QFont = camera_text.font()
-                font.setBold(True)
-                font.setPixelSize(15)
-                camera_text.setFont(font)
+                camera_text.setFixedHeight(100)
 
                 self.camera_label = QLabel(self)
                 self.camera_label.setAlignment(Qt.AlignCenter)
 
-                self.camera_finish_button = QPushButton("Continue", self)
-                self.camera_finish_button.setFixedHeight(30)
+                self.camera_finish_button = QPushButton("Next", self)
+                self.camera_finish_button.setFixedHeight(50)
 
                 camera_layout.addWidget(camera_text, alignment=Qt.AlignVCenter)
                 camera_layout.addWidget(self.camera_label, alignment=Qt.AlignVCenter)
@@ -528,56 +560,98 @@ class ExpApp(QMainWindow):
 
                 self.camera_widget.setLayout(camera_layout)
 
+            # Set Notification Widget
+            if True:
+                notification_layout = QVBoxLayout(self)
+
+                noti_text = QLabel(
+                    'Please disable every external interruptions:\n\n'
+                    '- Mute your phone, tablet, etc.\n\n'
+                    '- Disable notifications from Messenger programs (Slack, KakaoTalk, etc.)\n\n'
+                    '- (Windows) Disable notification as below image'
+                    , self
+                )
+                noti_text.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+                noti_text.setContentsMargins(10, 10, 10, 10)
+
+                noti_image = QLabel(self)
+                noti_image.setFixedSize(758, 270)
+                noti_image.setPixmap(QPixmap("./resources/focus_assistant.png"))
+
+                noti_open = QPushButton('Open Settings')
+                noti_open.setFixedSize(758, 50)
+                noti_open.clicked.connect(notification.open_settings)
+
+                noti_proceed = QPushButton('Next')
+                noti_proceed.setFixedSize(758, 50)
+                noti_proceed.clicked.connect(self.proceed)
+
+                notification_layout.addStretch(10)
+                notification_layout.addWidget(noti_text, alignment=Qt.AlignHCenter)
+                notification_layout.addStretch(1)
+                notification_layout.addWidget(noti_image, alignment=Qt.AlignHCenter)
+                notification_layout.addStretch(5)
+                notification_layout.addWidget(noti_open, alignment=Qt.AlignHCenter)
+                notification_layout.addStretch(1)
+                notification_layout.addWidget(noti_proceed, alignment=Qt.AlignHCenter)
+                notification_layout.addStretch(10)
+
+                notification_layout.setSpacing(10)
+                self.notification_widget.setLayout(notification_layout)
+
             # setCalibWidget
             if True:
                 instruction_layout = QVBoxLayout(self)
 
                 self.detail_text = QLabel(
                     'Thank you for your participation in the project.\n\n'
-                    'You will proceed\n'
-                    '1) Setting proper camera angle & distance,\n'
-                    '2) Perform an iteration of "Looking at a circle" -> "Clicking the circle",\n'
-                    '   (Please do not move your head during the step)\n'
-                    '3) Watch total 6 lectures and TAKE A QUIZ after each lecture.\n'
-                    '   (You can have a short break between each lectures)\n\n'
-                    'During the lecture, you will hear the "Beep" sound periodically.\n'
-                    'When you hear the sound,\n'
-                    '- Press [Y]: if you were on-focus (thinking of anything related to the lecture)\n'
-                    '- Press [N]: if you were off-focus (thinking or doing something unrelated)\n\n'
-                    'During the experiment, PLEASE AVOID MOVING LAPTOP or TOUCHING EYEGLASSES.',
+                    'With this program, you will proceed\n\n'
+                    '1) Turn off any distractions,\n\n'
+                    '2) Setting proper camera angle & distance,\n\n'
+                    '3) Perform an iteration of "Looking at a circle" -> "Clicking the circle",\n'
+                    '   (Please do not move your head during the step)\n\n'
+                    '4) Watch total 6 lectures and TAKE A QUIZ after each lecture.\n'
+                    '   (You can have a short break between each lectures)\n\n\n'
+                    '-----------------------------------------IMPORTANT-----------------------------------------\n\n'
+                    'During the lecture, you will hear the "Beep" sound periodically.\n\n'
+                    'When you hear the sound, based on your state just before hearing the sound,\n\n'
+                    '- Press [Y]: if you were on-focus (thinking of anything related to the lecture)\n\n'
+                    '- Press [N]: if you were off-focus (thinking or doing something unrelated)\n\n\n'
+                    'During the experiment, please avoid moving laptop and touching eyeglasses.\n\n'
+                    '----------------------------------------------------------------------------------------------------',
                     self
                 )
-                font: QFont = self.detail_text.font()
-                font.setPixelSize(15)
-                font.setBold(True)
-                self.detail_text.setFont(font)
-                self.detail_text.setStyleSheet("background-color: #FFFFFF")
+                self.detail_text.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+                # self.detail_text.setStyleSheet("background-color: #FFFFFF")
                 self.detail_text.setContentsMargins(10, 10, 10, 10)
-                instruction_layout.addWidget(self.detail_text, 0, alignment=Qt.AlignHCenter)
 
                 self.type_student_id_text = QLabel('Type your EXPERIMENT_ID below.')
-                self.type_student_id_text.setFont(QFont("Times New Roman", 15))
                 self.type_student_id_text.setContentsMargins(10, 10, 10, 10)
                 self.type_student_id_text.setFixedHeight(75)
-                instruction_layout.addWidget(self.type_student_id_text, 0, alignment=Qt.AlignHCenter)
 
                 self.user_id = QLineEdit(self)
-                self.user_id.setFixedSize(250, 75)
+                self.user_id.setFixedSize(500, 50)
                 self.user_id.setAlignment(Qt.AlignCenter)
                 self.user_id.setValidator(QIntValidator())
-                instruction_layout.addWidget(self.user_id, 0, alignment=Qt.AlignHCenter)
 
                 # Start button: start the experiment
                 if self.camera is not None:
-                    self.start_button = QPushButton('Start\n(Please wait after click)', self)
+                    self.start_button = QPushButton('Start', self)
                 else:
                     self.start_button = QPushButton("You don't have any camera available", self)
                     self.start_button.setDisabled(True)
-                self.start_button.setFixedSize(250, 125)
+                self.start_button.setFixedSize(500, 50)
                 self.start_button.clicked.connect(self.proceed)
 
+                instruction_layout.addStretch(10)
+                instruction_layout.addWidget(self.detail_text, 0, alignment=Qt.AlignHCenter)
+                instruction_layout.addStretch(5)
+                instruction_layout.addWidget(self.type_student_id_text, 0, alignment=Qt.AlignHCenter)
+                instruction_layout.addStretch(1)
+                instruction_layout.addWidget(self.user_id, 0, alignment=Qt.AlignHCenter)
+                instruction_layout.addStretch(1)
                 instruction_layout.addWidget(self.start_button, 0, alignment=Qt.AlignHCenter)
-                instruction_layout.setSpacing(10)
+                instruction_layout.addStretch(10)
 
                 self.instruction_widget.setLayout(instruction_layout)
 
@@ -618,16 +692,19 @@ class ExpApp(QMainWindow):
                 self.next_button = QPushButton('Start Video', self)
                 self.next_button.setFixedSize(100, 30)
                 self.next_button.clicked.connect(self.proceed)
+                self.next_button.setFont(self.small_font)
                 vlc_lower_layout.addWidget(self.next_button, alignment=Qt.AlignHCenter)
 
                 self.video_index_text = ' [Video: %01d/%01d] '
-                self.video_index_label = QLabel(self.video_index_text % (self.videoIndex, len(self.videos)))
+                self.video_index_label = QLabel(self.video_index_text % (1, len(self.videos)))
                 self.video_index_label.setFixedSize(80, 30)
+                self.video_index_label.setFont(self.small_font)
                 vlc_lower_layout.addWidget(self.video_index_label, alignment=Qt.AlignHCenter)
 
                 self.time_text = ' [Time: %02d:%02d/%02d:%02d] '
                 self.time_label = QLabel(self.time_text % (0, 0, 0, 0))
                 self.time_label.setFixedSize(160, 30)
+                self.time_label.setFont(self.small_font)
                 vlc_lower_layout.addWidget(self.time_label, alignment=Qt.AlignHCenter)
 
                 vlc_lower_layout.addStretch(1)
@@ -635,6 +712,8 @@ class ExpApp(QMainWindow):
                 self.probe_text = 'ON-FOCUS: PRESS [Y] / OFF-FOCUS: PRESS [N]'
                 self.probe_label = QLabel(self.probe_text)
                 font: QFont = self.probe_label.font()
+                font.setFamily('Roboto')
+                font.setPixelSize(13)
                 font.setBold(True)
                 self.probe_label.setFont(font)
                 self.probe_label.setFixedSize(500, 30)
@@ -650,15 +729,16 @@ class ExpApp(QMainWindow):
 
                 volume_label = QLabel('Volume:')
                 volume_label.setFixedSize(50, 30)
+                volume_label.setFont(self.small_font)
                 vlc_volume_layout.addWidget(volume_label, alignment=Qt.AlignHCenter | Qt.AlignRight)
 
                 volume_slider = QSlider(Qt.Horizontal, self)
                 volume_slider.setMaximum(100)
                 volume_slider.setMaximumWidth(300)
                 volume_slider.setFixedHeight(25)
-                volume_slider.setValue(self.media_player.audio_get_volume())
+                volume_slider.setValue(100)
                 volume_slider.setToolTip("Volume")
-                volume_slider.valueChanged.connect(self.media_player.audio_set_volume)
+                volume_slider.valueChanged.connect(self.setVolume)
 
                 vlc_volume_layout.addWidget(volume_slider, alignment=Qt.AlignHCenter)
                 vlc_volume_layout.addStretch(1)
@@ -721,10 +801,12 @@ class ExpApp(QMainWindow):
         :return:
         """
         self.log(f'proceed: {self._state}')
-        if self._state is self.State.INITIALIZE:
-            self.initialize()
-        elif self._state is self.State.INSTRUCTION:
+        if self._state is self.State.INSTRUCTION:
             self.set_instruction()
+        elif self._state is self.State.INITIALIZE:
+            self.initialize()
+        elif self._state is self.State.SET_NOTIFICATION:
+            self.set_notification()
         elif self._state is self.State.SET_MONITOR:
             self.set_monitor()
         elif self._state is self.State.CALIBRATION:
@@ -740,7 +822,7 @@ class ExpApp(QMainWindow):
     def set_instruction(self):
         pass
 
-    @proceedFunction(State.INITIALIZE, State.SET_MONITOR)
+    @proceedFunction(State.INITIALIZE, State.SET_NOTIFICATION)
     def initialize(self):
         screen = qApp.primaryScreen()
         dpi = screen.physicalDotsPerInch()
@@ -760,7 +842,7 @@ class ExpApp(QMainWindow):
         self.log('calibration_Radius,%d' % self.calib_r)
 
         # Resize frames
-        self.camera_label.setFixedHeight(self.rect().height() - 100)
+        self.camera_label.setFixedHeight(self.rect().height() - 200)
         self.video_frame.setFixedHeight(self.rect().height() - 30)
 
         # Sort URL w.r.t. Student ID
@@ -768,7 +850,7 @@ class ExpApp(QMainWindow):
         target = self.videos[1:]
         random.shuffle(target)
         self.videos[1:] = target
-        print(self.videos)
+        self.log(f'videos,{self.videos}')
 
         self.type_student_id_text.hide()
         self.start_button.hide()
@@ -800,6 +882,11 @@ class ExpApp(QMainWindow):
             (self.calib_r, self.rect().height() - self.calib_r),
             (self.rect().width() - self.calib_r, self.rect().height() - self.calib_r),
         ]
+
+    @proceedFunction(State.SET_NOTIFICATION, None)
+    def set_notification(self):
+        self.widget.setCurrentWidget(self.notification_widget)
+        self._state = self.State.SET_MONITOR
 
     @proceedFunction(State.SET_MONITOR, None)  # Asynchronously proceed CALIBRATION
     def set_monitor(self):
@@ -904,6 +991,12 @@ class ExpApp(QMainWindow):
         self.dialog.close()
         self.media_player.play()
 
+    def getVolume(self):
+        return self.media_player.audio_get_volume()
+
+    def setVolume(self, vol):
+        self.media_player.audio_set_volume(vol)
+
     @proceedFunction([State.DEMO_VIDEO, State.MAIN_VIDEO], None)
     def startVideo(self, demo=False):
         assert(self.videoIndex == 0 or not demo)
@@ -913,11 +1006,10 @@ class ExpApp(QMainWindow):
         if self.videoIndex >= len(self.videos):  # Finish (includes probeRunner cleanup)
             self.finishVideo()
             return
+        elif self.videoIndex > 0:
+            self.probeRunner.finish()
 
-        if self.videoIndex != 0:
-            self.probeRunner.finish(timeout=15.0)
-            self.probeRunner.terminate()
-            self.updater.terminate()
+        self.media_player = self.instance.media_player_new()
 
         self.activityRecorder.finish(timeout=5.0)  # Stop recording keyboard & mouse
         self.activityRecorder.join()
@@ -926,24 +1018,23 @@ class ExpApp(QMainWindow):
         self.activityRecorder.daemon = True
         self.activityRecorder.start()
 
+        self.updater = UIUpdater(self.video_frame, self.media_player, self.time_label, self.time_text,
+                                 self.video_index_label, (self.video_index_text % (self.videoIndex+2, len(self.videos))),
+                                 self.next_button,
+                                 self.videos[self.videoIndex][2], is_end=self.videoIndex == len(self.videos)-1)
+        self.updater.daemon = True
+        self.updater.start()
+        self.updater.signal.connect(self.finishVideo)
+
         self.probeRunner = ProbeRunner(self.probeQueue, self.media_player, self.videos[self.videoIndex][0], demo)
         self.probeRunner.daemon = True
         self.probeRunner.start()
         # self.dialog.moveToThread(self.probeRunner)  # You should move before connecting the signal
         self.probeRunner.signal.connect(self.showDialog)
-
-        self.updater = UIUpdater(self.media_player, self.time_label, self.time_text, self.next_button,
-                                 is_end=self.videoIndex == len(self.videos)-1)
-        self.updater.daemon = True
-        self.updater.start()
-        self.updater.signal.connect(self.finishVideo)
+        self.probeRunner.ui_signal.connect(self.updater.alertProbeRunnerFinished)
 
         url = parsing.get_best_url(self.videos[self.videoIndex][1])
         self.log("url,%s" % url)
-
-        self.activityRecorder.execute()  # Start recording keyboard & mouse
-        self.probeRunner.execute()  # Start sound player
-        self.updater.execute()  # Start UI updater
         try:
             media = self.instance.media_new(url)
             self.media_player.set_media(media)
@@ -954,20 +1045,25 @@ class ExpApp(QMainWindow):
             elif sys.platform == "darwin":  # for MacOS
                 self.media_player.set_nsobject(int(self.video_frame.winId()))
 
+            self.activityRecorder.execute()  # Start recording keyboard & mouse
+            self.probeRunner.execute()  # Start sound player
+            self.updater.execute()  # Start UI updater
+            self.video_frame.show()
+
             if self.media_player.play() < 0:  # Failed to play the media
                 self.log("play,%s,Fail" % self.videos[self.videoIndex][0])
             else:
                 self.log("play,%s,Start" % self.videos[self.videoIndex][0])
         except Exception as e:
             self.log("play,%s,Fail,%s" % (self.videos[self.videoIndex][0], str(e)))
+            self.next_button.setEnabled(True)
         finally:
             self.videoIndex += 1
             self._state = self.State.MAIN_VIDEO
-            self.video_index_label.setText(self.video_index_text % (self.videoIndex, len(self.videos)))
 
     @proceedFunction(State.MAIN_VIDEO, State.FINISH)
     def finishVideo(self):
-        self.probeRunner.finish(timeout=15.0)
+        self.probeRunner.finish(timeout=5.0)
         self.probeRunner.terminate()
         self.updater.terminate()
         return
@@ -981,10 +1077,20 @@ if __name__ == '__main__':
     if not os.path.exists('output'):
         os.mkdir('output')
 
-    # Pyinstaller fix
-    freeze_support()
+    with open('./output/stdout.txt', 'w') as stdout:
+        sys.stdout = stdout
 
-    # PyQT
-    app = QApplication(sys.argv)
-    ex = ExpApp()
-    sys.exit(app.exec_())
+        with open('./output/stderr.txt', 'w') as stderr:
+            sys.stderr = stderr
+
+            # Pyinstaller fix
+            freeze_support()
+
+            # PyQT
+            app = QApplication(sys.argv)
+            font = QFont("Roboto")
+            font.setBold(True)
+            font.setPixelSize(20)
+            app.setFont(font)
+            ex = ExpApp()
+            sys.exit(app.exec_())
