@@ -843,11 +843,11 @@ class ExpApp(QMainWindow):
         self.log(f'proceed: {self._state}')
         if self._state is self.State.SET_DISTRACTION:
             self.set_notification()
-        elif self._state is self.State.CALIB_INSTRUCTION:
-            self.set_instruction()
         elif self._state is self.State.SET_PARAMETERS:
             if self.user_id.text() != "":
                 self.initialize()
+        elif self._state is self.State.CALIB_INSTRUCTION:
+            self.set_instruction()
         elif self._state is self.State.SET_CAMERA:
             self.set_camera()
         elif self._state is self.State.CALIBRATION:
@@ -861,11 +861,9 @@ class ExpApp(QMainWindow):
         elif self._state is self.State.FINISH:
             self.final()
 
-    @proceedFunction(State.CALIB_INSTRUCTION, None)
-    def set_instruction(self):
-        self.widget.setCurrentWidget(self.calib_instruction_widget)
-        self._state = self.State.SET_CAMERA
-        pass
+    @proceedFunction(State.SET_DISTRACTION, State.SET_PARAMETERS)
+    def set_notification(self):
+        return
 
     @proceedFunction(State.SET_PARAMETERS, State.CALIB_INSTRUCTION)
     def initialize(self):
@@ -926,11 +924,13 @@ class ExpApp(QMainWindow):
             (self.rect().width() - self.calib_r, self.rect().height() - self.calib_r),
         ]
 
-    @proceedFunction(State.SET_DISTRACTION, State.SET_PARAMETERS)
-    def set_notification(self):
-        return
+    @proceedFunction(State.CALIB_INSTRUCTION, None)  # Next: SET_CAMERA
+    def set_instruction(self):
+        self.widget.setCurrentWidget(self.calib_instruction_widget)
+        self._state = self.State.SET_CAMERA
+        pass
 
-    @proceedFunction(State.SET_CAMERA, None)  # Asynchronously proceed CALIBRATION
+    @proceedFunction(State.SET_CAMERA, None)  # Next: CALIBRATION
     def set_camera(self):
         if self._debug:
             self.camera_finish_button.setDisabled(True)
@@ -1027,7 +1027,7 @@ class ExpApp(QMainWindow):
 
         self.widget.setCurrentWidget(self.calibration_widget)
 
-    @proceedFunction(State.CALIBRATION, None)  # Calibrate will proceed when done
+    @proceedFunction(State.CALIBRATION, None)  # Next: LECTURE_INSTRUCTION
     def calibrate(self):
         self.log("calibrate,%d" % self.pos)
 
@@ -1050,7 +1050,7 @@ class ExpApp(QMainWindow):
             self.pos += 1
             self.update()
 
-    @proceedFunction(State.LECTURE_INSTRUCTION, None)
+    @proceedFunction(State.LECTURE_INSTRUCTION, None)  # Next: DEMO_VIDEO
     def lecture_instruction(self):
         self.widget.setCurrentWidget(self.lecture_instruction_widget)
         self._state = self.State.DEMO_VIDEO
@@ -1106,7 +1106,6 @@ class ExpApp(QMainWindow):
         self.probeRunner = ProbeRunner(self.probeQueue, self.media_player, self.videos[self.videoIndex][0], demo)
         self.probeRunner.daemon = True
         self.probeRunner.start()
-        # self.dialog.moveToThread(self.probeRunner)  # You should move before connecting the signal
         self.probeRunner.signal.connect(self.showDialog)
         self.probeRunner.ui_signal.connect(self.updater.alertProbeRunnerFinished)
 
