@@ -1,5 +1,4 @@
 import playsound
-import winsound
 import sys
 
 
@@ -12,6 +11,7 @@ def play(url: str):
     :return:
     """
     if sys.platform is 'win32':
+        import winsound
         winsound.PlaySound(url, winsound.SND_ASYNC | winsound.SND_ALIAS)
     else:
         try:

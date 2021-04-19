@@ -8,12 +8,15 @@ from pynput import mouse, keyboard
 import cv2
 
 from multiprocessing import Process, Event, freeze_support, SimpleQueue
+from imutils import face_utils
 from threading import Thread
 from enum import Enum, auto
 import traceback
+import imutils
 import shutil
 import random
 import signal
+import dlib
 import time
 import sys
 import os
@@ -74,7 +77,7 @@ class UIUpdater(QThread):
 
             time_now = self.player.get_time()
             self.time_label.setText(self.time_text % getTime(int(time_now / 1000), total_length))
-            time.sleep(0.2)
+            time.sleep(0.5)
 
         # Wait for ProbeRunner
         self.probeEvent.wait()
@@ -117,8 +120,8 @@ class ProbeRunner(QThread):
         self.event.wait()
 
         padding = 0  # ms
-        interval = 40000  # ms
-        max_response = 10  # s
+        interval = 10000  # ms
+        max_response = 1  # s
 
         clock_before = 0
         idx_before = 0
@@ -132,7 +135,7 @@ class ProbeRunner(QThread):
 
         while True:
             try:
-                if not (self.player.is_playing() and self.player.get_state() != vlc.State(6) and self.event.is_set()):
+                if not (self.player.get_state() != vlc.State(6) and self.event.is_set()):
                     break
             except Exception as e:
                 output.write(str(e) + '\n')
@@ -162,8 +165,6 @@ class ProbeRunner(QThread):
             if last_probe is not None and not added:
                 output_str += "%f,%f,probe,%s\n" % (time_now, last_probe[0], last_probe[1])
                 added = True
-
-            time.sleep(0.1)
 
         self.ui_signal.emit()
         output.write(output_str)
@@ -257,23 +258,26 @@ class ActivityRecorder(Process):
         self.event.set()
         self.finishEvent.wait(timeout=timeout)
 
-    def log(self, string: str):
-        self.output.write("%f,%s\n" % (time.time(), string))
+    def key_log(self, string: str):
+        self.keyboard_output.write("%f,%s\n" % (time.time(), string))
+
+    def mouse_log(self, string: str):
+        self.mouse_output.write("%f,%s\n" % (time.time(), string))
 
     def onMouseMove(self, x, y):
-        self.log("mouse,move,%d,%d" % (x, y))
+        self.mouse_log("mouse,move,%d,%d" % (x, y))
 
     def onMouseClick(self, x, y, button, pressed):
-        self.log("mouse,click,%s,%d,%d,%d" % (button, pressed, x, y))
+        self.mouse_log("mouse,click,%s,%d,%d,%d" % (button, pressed, x, y))
 
     def onMouseScroll(self, x, y, dx, dy):
-        self.log("mouse,scroll,%d,%d,%d,%d" % (x, y, dx, dy))
+        self.mouse_log("mouse,scroll,%d,%d,%d,%d" % (x, y, dx, dy))
 
     def onKeyPress(self, key):
-        self.log("key,press,%s" % key)
+        self.key_log("key,press,%s" % key)
 
     def onKeyRelease(self, key):
-        self.log("key,release,%s" % key)
+        self.key_log("key,release,%s" % key)
         curr_time = time.time()
         if isinstance(key, keyboard.KeyCode):
             if key == keyboard.KeyCode.from_char('y'):
@@ -284,7 +288,8 @@ class ActivityRecorder(Process):
                 sound.play("./resources/Keyboard.mp3")
 
     def run(self) -> None:
-        self.output = open("output/activity_log_%s.txt" % self.name, 'w')
+        self.keyboard_output = open("output/keyboard_log_%s.txt" % self.name, 'w')
+        self.mouse_output = open("output/mouse_log_%s.txt" % self.name, 'w')
 
         self.mouse_listener = mouse.Listener(
             on_move=self.onMouseMove,
@@ -309,7 +314,9 @@ class ActivityRecorder(Process):
 
         self.keyboard_listener.stop()
         self.mouse_listener.stop()
-        self.output.close()
+
+        self.keyboard_output.close()
+        self.mouse_output.close()
 
         self.finishEvent.set()
 
@@ -337,7 +344,7 @@ def proceedFunction(state_before, state_after):
 class ExpApp(QMainWindow):
 
     class ProbingDialog(QDialog):
-        def __init__(self, probe_text, closeDialog):
+        def __init__(self, probe_text, close_dialog):
             super().__init__()
             self.setWindowFlags(self.windowFlags() & ~Qt.WindowContextHelpButtonHint)
 
@@ -357,7 +364,7 @@ class ExpApp(QMainWindow):
             self.setLayout(dialog_layout)
             self.setWindowTitle('Alert')
             self.setWindowModality(Qt.ApplicationModal)
-            self.closeDialog = closeDialog
+            self.closeDialog = close_dialog
 
         def connect(self, f):
             self.button.clicked.connect(f)
@@ -368,11 +375,12 @@ class ExpApp(QMainWindow):
 
     class State(Enum):
         START = auto()
-        INITIALIZE = auto()
-        INSTRUCTION = auto()
-        SET_NOTIFICATION = auto()
-        SET_MONITOR = auto()
+        SET_DISTRACTION = auto()
+        SET_PARAMETERS = auto()
+        CALIB_INSTRUCTION = auto()
+        SET_CAMERA = auto()
         CALIBRATION = auto()
+        LECTURE_INSTRUCTION = auto()
         DEMO_VIDEO = auto()
         MAIN_VIDEO = auto()
         FINISH = auto()
@@ -463,8 +471,8 @@ class ExpApp(QMainWindow):
 
         # taskbar.hide_taskbar()
 
-        # Debugging options
-        self.do_calibrate = True
+        # Debugging options (Disable camera setting & calibration)
+        self._debug = False
 
         self.videos = [
             # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
@@ -518,28 +526,30 @@ class ExpApp(QMainWindow):
             self.setWindowIcon(QIcon('resources/nmsl_logo_yellow.png'))
 
             self.widget = QStackedWidget(self)
-            self.instruction_widget = QWidget(self)
-            self.camera_widget = QWidget(self)
-            self.notification_widget = QWidget(self)
+            self.distraction_instruction_widget = QWidget(self)
+            self.calib_instruction_widget = QWidget(self)
+            self.camera_setting_widget = QWidget(self)
             self.calibration_widget = QWidget(self)
-            self.vlc_widget = QWidget(self)
+            self.lecture_instruction_widget = QWidget(self)
+            self.lecture_video_widget = QWidget(self)
             self.finish_widget = QWidget(self)
 
-            self.widget.addWidget(self.instruction_widget)
+            self.widget.addWidget(self.distraction_instruction_widget)
+            self.widget.addWidget(self.calib_instruction_widget)
+            self.widget.addWidget(self.camera_setting_widget)
             self.widget.addWidget(self.calibration_widget)
-            self.widget.addWidget(self.camera_widget)
-            self.widget.addWidget(self.notification_widget)
-            self.widget.addWidget(self.vlc_widget)
+            self.widget.addWidget(self.lecture_instruction_widget)
+            self.widget.addWidget(self.lecture_video_widget)
             self.widget.addWidget(self.finish_widget)
 
             self.setCentralWidget(self.widget)
-            self.widget.setCurrentWidget(self.instruction_widget)
+            self.widget.setCurrentWidget(self.calib_instruction_widget)
 
             # Set Camera Setting Screen
             if True:
                 camera_layout = QVBoxLayout(self)
                 camera_text = QLabel(
-                    'Please move your monitor/laptop closer to make face FIT LARGER than the rectangle.\n\n'
+                    'Please move your monitor/laptop close and center your face so it exceeds BLUE rectangle.\n\n'
                     'Please avoid direct lights into the camera.'
                     , self
                 )
@@ -558,16 +568,20 @@ class ExpApp(QMainWindow):
 
                 self.camera_running = Event()
 
-                self.camera_widget.setLayout(camera_layout)
+                self.camera_setting_widget.setLayout(camera_layout)
 
             # Set Notification Widget
             if True:
                 notification_layout = QVBoxLayout(self)
 
                 noti_text = QLabel(
+                    'Thank you for your participation in the project.\n'
+                    'Your participation will help to improve the understanding of online learning.\n\n'
                     'Please disable every external interruptions:\n\n'
-                    '- Mute your phone, tablet, etc.\n\n'
-                    '- Disable notifications from Messenger programs (Slack, KakaoTalk, etc.)\n\n'
+                    '- Mute your phone, tablet, etc.\n'
+                    '- Disable notifications from Messenger programs (Slack, KakaoTalk, etc.)\n'
+                    '- Disconnect every external monitor (if you are connected)\n'
+                    '- Please do not let others disturb you\n'
                     '- (Windows) Disable notification as below image'
                     , self
                 )
@@ -578,82 +592,64 @@ class ExpApp(QMainWindow):
                 noti_image.setFixedSize(758, 270)
                 noti_image.setPixmap(QPixmap("./resources/focus_assistant.png"))
 
-                noti_open = QPushButton('Open Settings')
+                noti_open = QPushButton('Open Settings (Only Windows for now)')
                 noti_open.setFixedSize(758, 50)
                 noti_open.clicked.connect(notification.open_settings)
 
-                noti_proceed = QPushButton('Next')
-                noti_proceed.setFixedSize(758, 50)
-                noti_proceed.clicked.connect(self.proceed)
+                type_student_id_text = QLabel('Type your EXPERIMENT_ID below.')
+                type_student_id_text.setFixedHeight(75)
+
+                self.user_id = QLineEdit(self)
+                self.user_id.setFixedSize(758, 50)
+                self.user_id.setAlignment(Qt.AlignCenter)
+                self.user_id.setValidator(QIntValidator())
+
+                self.noti_proceed = QPushButton('Next')
+                self.noti_proceed.setFixedSize(758, 50)
+                self.noti_proceed.clicked.connect(self.proceed)
 
                 notification_layout.addStretch(10)
                 notification_layout.addWidget(noti_text, alignment=Qt.AlignHCenter)
                 notification_layout.addStretch(1)
                 notification_layout.addWidget(noti_image, alignment=Qt.AlignHCenter)
-                notification_layout.addStretch(5)
+                notification_layout.addStretch(3)
                 notification_layout.addWidget(noti_open, alignment=Qt.AlignHCenter)
+                notification_layout.addStretch(3)
+                notification_layout.addWidget(type_student_id_text, alignment=Qt.AlignHCenter)
                 notification_layout.addStretch(1)
-                notification_layout.addWidget(noti_proceed, alignment=Qt.AlignHCenter)
+                notification_layout.addWidget(self.user_id, alignment=Qt.AlignHCenter)
+                notification_layout.addStretch(1)
+                notification_layout.addWidget(self.noti_proceed, alignment=Qt.AlignHCenter)
                 notification_layout.addStretch(10)
 
                 notification_layout.setSpacing(10)
-                self.notification_widget.setLayout(notification_layout)
+                self.distraction_instruction_widget.setLayout(notification_layout)
 
-            # setCalibWidget
+            # Set Calibration Instruction Widget
             if True:
                 instruction_layout = QVBoxLayout(self)
 
-                self.detail_text = QLabel(
-                    'Thank you for your participation in the project.\n\n'
-                    'With this program, you will proceed\n\n'
-                    '1) Turn off any distractions,\n\n'
-                    '2) Setting proper camera angle & distance,\n\n'
-                    '3) Perform an iteration of "Looking at a circle" -> "Clicking the circle",\n'
-                    '   (Please do not move your head during the step)\n\n'
-                    '4) Watch total 6 lectures and TAKE A QUIZ after each lecture.\n'
-                    '   (You can have a short break between each lectures)\n\n\n'
-                    '-----------------------------------------IMPORTANT-----------------------------------------\n\n'
-                    'During the lecture, you will hear the "Beep" sound periodically.\n\n'
-                    'When you hear the sound, based on your state just before hearing the sound,\n\n'
-                    '- Press [Y]: if you were on-focus (thinking of anything related to the lecture)\n\n'
-                    '- Press [N]: if you were off-focus (thinking or doing something unrelated)\n\n\n'
-                    'During the experiment, please avoid moving laptop and touching eyeglasses.\n\n'
-                    '----------------------------------------------------------------------------------------------------',
+                detail_text = QLabel(
+                    'Now, you will proceed\n\n'
+                    '1) Setting proper camera angle & distance,\n\n'
+                    '2) Perform an iteration of "Looking at a circle" -> "Clicking the circle",\n'
+                    '   (Please do not move your head during the step)\n\n',
                     self
                 )
-                self.detail_text.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
-                # self.detail_text.setStyleSheet("background-color: #FFFFFF")
-                self.detail_text.setContentsMargins(10, 10, 10, 10)
+                detail_text.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+                detail_text.setContentsMargins(10, 10, 10, 10)
 
-                self.type_student_id_text = QLabel('Type your EXPERIMENT_ID below.')
-                self.type_student_id_text.setContentsMargins(10, 10, 10, 10)
-                self.type_student_id_text.setFixedHeight(75)
-
-                self.user_id = QLineEdit(self)
-                self.user_id.setFixedSize(500, 50)
-                self.user_id.setAlignment(Qt.AlignCenter)
-                self.user_id.setValidator(QIntValidator())
-
-                # Start button: start the experiment
-                if self.camera is not None:
-                    self.start_button = QPushButton('Start', self)
-                else:
-                    self.start_button = QPushButton("You don't have any camera available", self)
-                    self.start_button.setDisabled(True)
-                self.start_button.setFixedSize(500, 50)
-                self.start_button.clicked.connect(self.proceed)
+                start_button = QPushButton('Next', self)
+                start_button.setFixedSize(758, 50)
+                start_button.clicked.connect(self.proceed)
 
                 instruction_layout.addStretch(10)
-                instruction_layout.addWidget(self.detail_text, 0, alignment=Qt.AlignHCenter)
-                instruction_layout.addStretch(5)
-                instruction_layout.addWidget(self.type_student_id_text, 0, alignment=Qt.AlignHCenter)
+                instruction_layout.addWidget(detail_text, 0, alignment=Qt.AlignHCenter)
                 instruction_layout.addStretch(1)
-                instruction_layout.addWidget(self.user_id, 0, alignment=Qt.AlignHCenter)
-                instruction_layout.addStretch(1)
-                instruction_layout.addWidget(self.start_button, 0, alignment=Qt.AlignHCenter)
+                instruction_layout.addWidget(start_button, 0, alignment=Qt.AlignHCenter)
                 instruction_layout.addStretch(10)
 
-                self.instruction_widget.setLayout(instruction_layout)
+                self.calib_instruction_widget.setLayout(instruction_layout)
 
             # Set Calibration Widget
             if True:
@@ -668,7 +664,50 @@ class ExpApp(QMainWindow):
                 calib_layout.addWidget(self.ellipse_button, alignment=Qt.AlignAbsolute)
                 self.calibration_widget.setLayout(calib_layout)
 
-            # setVLCWidget
+            # Set Lecture Instruction Widget
+            if True:
+                instruction_layout = QVBoxLayout(self)
+
+                lecture_text = QLabel(
+                    'Now, you will watch total 6 lectures and TAKE A QUIZ after each lecture.\n\n'
+                    '- You can have a short (30 sec ~ 1 min) break between each lectures\n\n'
+                    '- Be careful, per each video, you CANNOT get the monetary reward\n'
+                    '   if you have a zero quiz score!\n\n\n'
+                    '-----------------------------------------IMPORTANT-----------------------------------------\n\n'
+                    'During the lecture, you will hear the "Beep" sound periodically.\n\n'
+                    'When you hear the sound, based on your state just before hearing the sound,\n\n'
+                    '- Press [Y]: if you were on-focus (thinking of anything related to the lecture)\n\n'
+                    '- Press [N]: if you were off-focus (thinking or doing something unrelated)\n\n'
+                    'Please report as honest as you can; this will not affect your monetary reward.\n\n\n'
+                    'During the experiment, please avoid moving laptop and touching eyeglasses.\n\n'
+                    '----------------------------------------------------------------------------------------------------',
+                    self
+                )
+                lecture_text.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
+                lecture_text.setContentsMargins(10, 10, 10, 10)
+
+                beep_button = QPushButton('Test Beep Sound', self)
+                beep_button.setFixedSize(758, 50)
+
+                def launch_beep():
+                    sound.play("./resources/Ding-sound-effect.mp3")
+                beep_button.clicked.connect(launch_beep)
+
+                start_button = QPushButton('Next', self)
+                start_button.setFixedSize(758, 50)
+                start_button.clicked.connect(self.proceed)
+
+                instruction_layout.addStretch(10)
+                instruction_layout.addWidget(lecture_text, 0, alignment=Qt.AlignHCenter)
+                instruction_layout.addStretch(1)
+                instruction_layout.addWidget(beep_button, 0, alignment=Qt.AlignHCenter)
+                instruction_layout.addStretch(1)
+                instruction_layout.addWidget(start_button, 0, alignment=Qt.AlignHCenter)
+                instruction_layout.addStretch(10)
+
+                self.lecture_instruction_widget.setLayout(instruction_layout)
+
+            # Set Lecture Video Widget
             if True:
                 vlc_layout = QVBoxLayout(self)
                 # VLC player
@@ -752,7 +791,7 @@ class ExpApp(QMainWindow):
 
                 vlc_layout.setSpacing(0)
                 vlc_layout.setContentsMargins(0, 0, 0, 0)
-                self.vlc_widget.setLayout(vlc_layout)
+                self.lecture_video_widget.setLayout(vlc_layout)
 
                 # Dialog
                 self.dialog = self.ProbingDialog(self.probe_text, self.closeDialog)
@@ -774,7 +813,7 @@ class ExpApp(QMainWindow):
                 finish_layout.addWidget(self.finish_label, alignment=Qt.AlignHCenter)
 
                 finish_button = QPushButton('Finish\n(Please Wait)', self)
-                finish_button.setFixedSize(400, 100)
+                finish_button.setFixedSize(758, 100)
                 finish_button.clicked.connect(self.close)
                 finish_layout.addWidget(finish_button, alignment=Qt.AlignHCenter)
 
@@ -792,7 +831,8 @@ class ExpApp(QMainWindow):
             self.pos = 0
             self.calib_position_center: List[Tuple[int, int]] = [(0, 0)]
 
-        self._state = self.State.INSTRUCTION
+        self._state = self.State.SET_DISTRACTION
+        self.widget.setCurrentWidget(self.distraction_instruction_widget)
 
     def proceed(self):
         """
@@ -801,29 +841,36 @@ class ExpApp(QMainWindow):
         :return:
         """
         self.log(f'proceed: {self._state}')
-        if self._state is self.State.INSTRUCTION:
-            self.set_instruction()
-        elif self._state is self.State.INITIALIZE:
-            self.initialize()
-        elif self._state is self.State.SET_NOTIFICATION:
+        if self._state is self.State.SET_DISTRACTION:
             self.set_notification()
-        elif self._state is self.State.SET_MONITOR:
-            self.set_monitor()
+        elif self._state is self.State.CALIB_INSTRUCTION:
+            self.set_instruction()
+        elif self._state is self.State.SET_PARAMETERS:
+            if self.user_id.text() != "":
+                self.initialize()
+        elif self._state is self.State.SET_CAMERA:
+            self.set_camera()
         elif self._state is self.State.CALIBRATION:
             self.calibrate()
+        elif self._state is self.State.LECTURE_INSTRUCTION:
+            self.lecture_instruction()
         elif self._state is self.State.DEMO_VIDEO:
-            self.startVideo(demo=True)
+            self.start_video(demo=True)
         elif self._state is self.State.MAIN_VIDEO:
-            self.startVideo()
+            self.start_video()
         elif self._state is self.State.FINISH:
             self.final()
 
-    @proceedFunction(State.INSTRUCTION, State.INITIALIZE)
+    @proceedFunction(State.CALIB_INSTRUCTION, None)
     def set_instruction(self):
+        self.widget.setCurrentWidget(self.calib_instruction_widget)
+        self._state = self.State.SET_CAMERA
         pass
 
-    @proceedFunction(State.INITIALIZE, State.SET_NOTIFICATION)
+    @proceedFunction(State.SET_PARAMETERS, State.CALIB_INSTRUCTION)
     def initialize(self):
+        self.noti_proceed.setDisabled(True)
+
         screen = qApp.primaryScreen()
         dpi = screen.physicalDotsPerInch()
         full_screen = screen.size()
@@ -836,6 +883,7 @@ class ExpApp(QMainWindow):
         self.margin = self.calib_r * 2
 
         # Leave logs
+        self.log('experimenter,%s' % self.user_id.text())
         self.log('monitor,%f,%f' % (x_mm, y_mm))
         self.log('resolution,%d,%d' % (full_screen.width(), full_screen.height()))
         self.log('inner_area,%d,%d' % (self.rect().width(), self.rect().height()))
@@ -851,11 +899,6 @@ class ExpApp(QMainWindow):
         random.shuffle(target)
         self.videos[1:] = target
         self.log(f'videos,{self.videos}')
-
-        self.type_student_id_text.hide()
-        self.start_button.hide()
-        self.detail_text.hide()
-        self.user_id.hide()
 
         self.ellipse_button.setFixedSize(self.calib_r * 2, self.calib_r * 2)
         self.ellipse_button.show()
@@ -883,18 +926,15 @@ class ExpApp(QMainWindow):
             (self.rect().width() - self.calib_r, self.rect().height() - self.calib_r),
         ]
 
-    @proceedFunction(State.SET_NOTIFICATION, None)
+    @proceedFunction(State.SET_DISTRACTION, State.SET_PARAMETERS)
     def set_notification(self):
-        self.widget.setCurrentWidget(self.notification_widget)
-        self._state = self.State.SET_MONITOR
+        return
 
-    @proceedFunction(State.SET_MONITOR, None)  # Asynchronously proceed CALIBRATION
-    def set_monitor(self):
-        if self.user_id.text() == "":
-            return
-        self.log('user_id,%s' % (self.user_id.text()))
-
-        self.widget.setCurrentWidget(self.camera_widget)
+    @proceedFunction(State.SET_CAMERA, None)  # Asynchronously proceed CALIBRATION
+    def set_camera(self):
+        if self._debug:
+            self.camera_finish_button.setDisabled(True)
+        self.widget.setCurrentWidget(self.camera_setting_widget)
 
         cap = None
         success = self.camera is not None
@@ -916,7 +956,11 @@ class ExpApp(QMainWindow):
         height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
         self.log("cameraCapture,%d,%d" % (int(width), int(height)))
 
-        def frame_thread_run():
+        def distance2(p1, p2):
+            return (p1[0]-p2[0])**2 + (p1[1]-p2[1])**2
+
+        def frame_thread_run(success: Event):
+            detector = dlib.get_frontal_face_detector()
             while not self.camera_running.is_set():
                 try:
                     ret, img = cap.read()
@@ -924,10 +968,30 @@ class ExpApp(QMainWindow):
                         img = img.copy()
                         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
                         img = cv2.flip(img, 1)
+                        img = imutils.resize(img, width=500)
+
+                        # Detect face bounding box
+                        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                        rect = detector(gray, 1)
                         h, w, c = img.shape
-                        img = cv2.resize(img, dsize=(int(self.camera_label.height() * w/h), int(self.camera_label.height())))
+                        t_size = w/4  # target size
+                        if len(rect) > 0:
+                            (x, y, x_d, y_d) = face_utils.rect_to_bb(rect[0])
+                            img = cv2.rectangle(img, (x, y), (x+x_d, y+y_d), (255, 0, 0), 2)
+                            rect_center = (x+int(x_d/2), y+int(y_d/2))
+                            img = cv2.circle(img, rect_center, 1, (255, 0, 0), -1)
+                            if x_d >= t_size and distance2(rect_center, (int(w/2), int(h/2))) < (t_size/3)**2:
+                                self.camera_finish_button.setEnabled(True)
+                                success.set()
+
+                        # Draw target box
+                        img = cv2.rectangle(img, (int((w-t_size)/2), int((h-t_size)/2)),
+                                            (int((w+t_size)/2), int((h+t_size)/2)), (0, 0, 255), 2)
+                        img = cv2.circle(img, (int(w/2), int(h/2)), 1, (0, 0, 255), -1)
+                        img = imutils.resize(img, height=int(self.camera_label.height()))
+
+                        # Draw in PyQT
                         h, w, c = img.shape
-                        img = cv2.rectangle(img, (int(w/3), int(h/4)), (int(2*w/3), int(3*h/4)), (0, 0, 255), 3)
                         image = QImage(img.data, w, h, w*c, QImage.Format_RGB888)
                         pixmap = QPixmap.fromImage(image)
                         self.camera_label.setPixmap(pixmap)
@@ -937,16 +1001,18 @@ class ExpApp(QMainWindow):
                     self.log(str(e))
                     break
 
-        frame_thread = Thread(target=frame_thread_run, args=())
+        success = Event()
+        frame_thread = Thread(target=frame_thread_run, args=(success,))
         frame_thread.daemon = True
         frame_thread.start()
 
         def camera_finished_wrapper():
-            self.camera_finished(frame_thread, cap)
+            if success.is_set() or not self._debug:
+                self.camera_finished(frame_thread, cap)
 
         self.camera_finish_button.clicked.connect(camera_finished_wrapper)
 
-    @proceedFunction(State.SET_MONITOR, State.CALIBRATION)
+    @proceedFunction(State.SET_CAMERA, State.CALIBRATION)
     def camera_finished(self, frame_thread, cap):
         self.camera_running.set()
 
@@ -967,21 +1033,27 @@ class ExpApp(QMainWindow):
 
         if self.pos >= len(self.calib_position_center):
             self.ellipse_button.hide()
-            self.widget.setCurrentWidget(self.vlc_widget)
-            self._state = self.State.DEMO_VIDEO
+            self._state = self.State.LECTURE_INSTRUCTION
+            self.proceed()
             return
         else:
             self.ellipse_button.move(self.calib_position_center[self.pos][0] - self.calib_r,
                                      self.calib_position_center[self.pos][1] - self.calib_r)
 
-        if not self.do_calibrate:
+        if not self._debug:
             self.pos = len(self.calib_position_center) + 1
             self.ellipse_button.hide()
-            self.widget.setCurrentWidget(self.vlc_widget)
-            self._state = self.State.DEMO_VIDEO
+            self._state = self.State.LECTURE_INSTRUCTION
+            self.proceed()
+            return
         else:
             self.pos += 1
             self.update()
+
+    @proceedFunction(State.LECTURE_INSTRUCTION, None)
+    def lecture_instruction(self):
+        self.widget.setCurrentWidget(self.lecture_instruction_widget)
+        self._state = self.State.DEMO_VIDEO
 
     def showDialog(self):
         self.media_player.pause()
@@ -998,8 +1070,13 @@ class ExpApp(QMainWindow):
         self.media_player.audio_set_volume(vol)
 
     @proceedFunction([State.DEMO_VIDEO, State.MAIN_VIDEO], None)
-    def startVideo(self, demo=False):
-        assert(self.videoIndex == 0 or not demo)
+    def start_video(self, demo=False):
+        assert (self.videoIndex == 0 or not demo)
+
+        # Initialize UI without starting the video
+        if self.widget.currentWidget() != self.lecture_video_widget:
+            self.widget.setCurrentWidget(self.lecture_video_widget)
+            return
 
         self.next_button.setDisabled(True)
 
