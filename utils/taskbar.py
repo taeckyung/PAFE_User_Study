@@ -1,11 +1,11 @@
 import sys
-import ctypes
-from ctypes import wintypes
 
 hide_taskbar = lambda _: None
 unhide_taskbar = lambda _: None
 
 if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
     user32 = ctypes.WinDLL("user32")
 
     SW_HIDE = 0
