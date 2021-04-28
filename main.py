@@ -34,8 +34,7 @@ class UIUpdater(QThread):
     signal = pyqtSignal()
 
     def __init__(self, frame: QFrame, player: vlc.MediaPlayer, time_label: QLabel, time_text: str,
-                 video_label: QLabel, video_text: str, next_button: QPushButton,
-                 quiz_url: str, is_end=False):
+                 video_label: QLabel, video_text: str, next_button: QPushButton, is_end=False):
         super().__init__()
         self.event = Event()
         self.probeEvent = Event()
@@ -47,7 +46,7 @@ class UIUpdater(QThread):
         self.video_text = video_text
         self.video_label = video_label
         self.next_button = next_button
-        self.quiz_url = quiz_url
+        # self.quiz_url = quiz_url
         self.is_end = is_end
 
     def execute(self):
@@ -85,8 +84,8 @@ class UIUpdater(QThread):
 
         self.video_label.setText(self.video_text)
         self.time_label.setText(self.time_text % (0, 0, 0, 0))
-        if self.event.is_set():  # Normal ending with video finished
-            os.system(f"start {self.quiz_url}")
+        # if self.event.is_set():  # Normal ending with video finished
+        #     os.system(f"start {self.quiz_url}")
         self.next_button.setEnabled(True)
 
         if self.is_end:
@@ -119,9 +118,9 @@ class ProbeRunner(QThread):
 
         self.event.wait()
 
-        padding = 0  # ms
-        interval = 10000  # ms
-        max_response = 1  # s
+        padding = 5000  # ms
+        interval = 40000  # ms
+        max_response = 10  # s
 
         clock_before = 0
         idx_before = 0
@@ -176,6 +175,7 @@ class VideoRecorder(Process):
     def __init__(self, cam: int):
         super().__init__()
         self.event = Event()
+        self.proceed_event = Event()
         self.cam = cam
         self.video_timeline = None
         self.video_cap = None
@@ -195,6 +195,7 @@ class VideoRecorder(Process):
 
     def execute(self):
         self.event.set()
+        self.proceed_event.wait()
 
     def finish(self, timeout=None):
         self.event.clear()
@@ -217,6 +218,7 @@ class VideoRecorder(Process):
         self.video_out = cv2.VideoWriter("output/recording.mp4", fourcc, 30.0, size)
 
         self.event.wait()
+        self.proceed_event.set()
 
         while self.event.is_set():
             ret, frame = self.video_cap.read()
@@ -280,10 +282,10 @@ class ActivityRecorder(Process):
         self.key_log("key,release,%s" % key)
         curr_time = time.time()
         if isinstance(key, keyboard.KeyCode):
-            if key == keyboard.KeyCode.from_char('y'):
+            if key in [keyboard.KeyCode.from_char('f'), keyboard.KeyCode.from_char('F'), keyboard.KeyCode.from_char('ㄹ')]:
                 self.queue.put((curr_time, 'y'))
                 sound.play("./resources/Keyboard.mp3")
-            elif key == keyboard.KeyCode.from_char('n'):
+            elif key in [keyboard.KeyCode.from_char('n'), keyboard.KeyCode.from_char('N'), keyboard.KeyCode.from_char('ㅜ')]:
                 self.queue.put((curr_time, 'n'))
                 sound.play("./resources/Keyboard.mp3")
 
@@ -463,6 +465,8 @@ class ExpApp(QMainWindow):
             self.log(str(e))
 
         self.output.close()
+
+        os.system("start https://forms.gle/UUVqMUMvwvGFKSet6")
         # taskbar.unhide_taskbar()
         exit(0)
 
@@ -476,12 +480,14 @@ class ExpApp(QMainWindow):
 
         self.videos = [
             # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
-            ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00", "https://forms.gle/fsq9JoA3uQW1XVsL8"),  # 11m; pre-video
-            ("Intro-to-Forensic-Science",   "https://youtu.be/FmPBNPFwiws", "https://forms.gle/DBgafv1NRG6PbRuh8"),  # 12m
-            ("Intro-to-Economic-Theories",  "https://youtu.be/8yM_vw9xKnQ", "https://forms.gle/BL1siLNCM5WaaLWm8"),  # 12m
-            ("AI-For-Everyone",             "https://youtu.be/bBaZ05WsTUM", "https://forms.gle/1cLrxunMHAXBktVL8"),  # 11m
-            ("Game-Theory",                 "https://youtu.be/o5vvcohd1Qg", "https://forms.gle/83ixrQgC86xczpfV8"),  # 10m
-            ("Cryptography-I",              "https://youtu.be/XnueMv0EUHQ", "https://forms.gle/t28mL8xmZSabigSe9")   # 15m
+            # ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00", "https://forms.gle/fsq9JoA3uQW1XVsL8"),  # 11m; pre-video
+            # ("Intro-to-Forensic-Science",   "https://youtu.be/FmPBNPFwiws", "https://forms.gle/DBgafv1NRG6PbRuh8"),  # 12m
+            # ("Intro-to-Economic-Theories",  "https://youtu.be/8yM_vw9xKnQ", "https://forms.gle/BL1siLNCM5WaaLWm8"),  # 12m
+            # ("AI-For-Everyone",             "https://youtu.be/bBaZ05WsTUM", "https://forms.gle/1cLrxunMHAXBktVL8"),  # 11m
+            # ("Game-Theory",                 "https://youtu.be/o5vvcohd1Qg", "https://forms.gle/83ixrQgC86xczpfV8"),  # 10m
+            # ("Cryptography-I",              "https://youtu.be/XnueMv0EUHQ", "https://forms.gle/t28mL8xmZSabigSe9")   # 15m
+            ("Pre-video", "https://youtu.be/-MTMhfmh-jM"),
+            ("Main-video", "https://youtu.be/0G6jDukKeNA")
         ]
         self.videoIndex = 0
 
@@ -577,7 +583,7 @@ class ExpApp(QMainWindow):
                 noti_text = QLabel(
                     'Thank you for your participation in the project.\n'
                     'Your participation will help to improve the understanding of online learning.\n\n'
-                    'Please disable every external interruptions:\n\n'
+                    'Please disable every external distractions:\n\n'
                     '- Mute your phone, tablet, etc.\n'
                     '- Disable notifications from Messenger programs (Slack, KakaoTalk, etc.)\n'
                     '- Disconnect every external monitor (if you are connected)\n'
@@ -596,7 +602,7 @@ class ExpApp(QMainWindow):
                 noti_open.setFixedSize(758, 50)
                 noti_open.clicked.connect(notification.open_settings)
 
-                type_student_id_text = QLabel('Type your EXPERIMENT_ID below.')
+                type_student_id_text = QLabel('Type your STUDENT_ID below.')
                 type_student_id_text.setFixedHeight(75)
 
                 self.user_id = QLineEdit(self)
@@ -669,18 +675,16 @@ class ExpApp(QMainWindow):
                 instruction_layout = QVBoxLayout(self)
 
                 lecture_text = QLabel(
-                    'Now, you will watch total 6 lectures and TAKE A QUIZ after each lecture.\n\n'
-                    '- You can have a short (30 sec ~ 1 min) break between each lectures\n\n'
-                    '- Be careful, per each video, you CANNOT get the monetary reward\n'
-                    '   if you have a zero quiz score!\n\n\n'
+                    'Now, you will watch one short + one long lecture and TAKE A QUIZ at the end.\n\n'
                     '-----------------------------------------IMPORTANT-----------------------------------------\n\n'
                     'During the lecture, you will hear the "Beep" sound periodically.\n\n'
                     'When you hear the sound, based on your state just before hearing the sound,\n\n'
-                    '- Press [Y]: if you were on-focus (thinking of anything related to the lecture)\n\n'
+                    '- Press [F]: if you were on-focus (thinking of anything related to the lecture)\n\n'
                     '- Press [N]: if you were off-focus (thinking or doing something unrelated)\n\n'
                     'Please report as honest as you can; this will not affect your monetary reward.\n\n\n'
                     'During the experiment, please avoid moving laptop and touching eyeglasses.\n\n'
-                    '----------------------------------------------------------------------------------------------------',
+                    '----------------------------------------------------------------------------------------------------\n\n'
+                    'Please adjust your system volume to make sure you hear the beep sound.',
                     self
                 )
                 lecture_text.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
@@ -748,7 +752,7 @@ class ExpApp(QMainWindow):
 
                 vlc_lower_layout.addStretch(1)
 
-                self.probe_text = 'ON-FOCUS: PRESS [Y] / OFF-FOCUS: PRESS [N]'
+                self.probe_text = 'ON-FOCUS: PRESS [F] / OFF-FOCUS: PRESS [N]'
                 self.probe_label = QLabel(self.probe_text)
                 font: QFont = self.probe_label.font()
                 font.setFamily('Roboto')
@@ -837,6 +841,7 @@ class ExpApp(QMainWindow):
     def proceed(self):
         """
         Every non-inherited methods are executed here.
+        This function is only called at proceedFunction().
 
         :return:
         """
@@ -932,7 +937,7 @@ class ExpApp(QMainWindow):
 
     @proceedFunction(State.SET_CAMERA, None)  # Next: CALIBRATION
     def set_camera(self):
-        if self._debug:
+        if not self._debug:
             self.camera_finish_button.setDisabled(True)
         self.widget.setCurrentWidget(self.camera_setting_widget)
 
@@ -1007,7 +1012,7 @@ class ExpApp(QMainWindow):
         frame_thread.start()
 
         def camera_finished_wrapper():
-            if success.is_set() or not self._debug:
+            if success.is_set() or self._debug:
                 self.camera_finished(frame_thread, cap)
 
         self.camera_finish_button.clicked.connect(camera_finished_wrapper)
@@ -1033,22 +1038,24 @@ class ExpApp(QMainWindow):
 
         if self.pos >= len(self.calib_position_center):
             self.ellipse_button.hide()
-            self._state = self.State.LECTURE_INSTRUCTION
-            self.proceed()
+            self.end_calibrate()
             return
         else:
             self.ellipse_button.move(self.calib_position_center[self.pos][0] - self.calib_r,
                                      self.calib_position_center[self.pos][1] - self.calib_r)
 
-        if not self._debug:
+        if self._debug:
             self.pos = len(self.calib_position_center) + 1
             self.ellipse_button.hide()
-            self._state = self.State.LECTURE_INSTRUCTION
-            self.proceed()
+            self.end_calibrate()
             return
         else:
             self.pos += 1
             self.update()
+
+    @proceedFunction(State.CALIBRATION, State.LECTURE_INSTRUCTION)
+    def end_calibrate(self):
+        return
 
     @proceedFunction(State.LECTURE_INSTRUCTION, None)  # Next: DEMO_VIDEO
     def lecture_instruction(self):
@@ -1097,8 +1104,7 @@ class ExpApp(QMainWindow):
 
         self.updater = UIUpdater(self.video_frame, self.media_player, self.time_label, self.time_text,
                                  self.video_index_label, (self.video_index_text % (self.videoIndex+2, len(self.videos))),
-                                 self.next_button,
-                                 self.videos[self.videoIndex][2], is_end=self.videoIndex == len(self.videos)-1)
+                                 self.next_button, is_end=self.videoIndex == len(self.videos)-1)
         self.updater.daemon = True
         self.updater.start()
         self.updater.signal.connect(self.finishVideo)
