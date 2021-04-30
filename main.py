@@ -7,7 +7,7 @@ from PyQt5.QtGui import *
 from pynput import mouse, keyboard
 import cv2
 
-from multiprocessing import Process, Event, freeze_support, SimpleQueue
+from multiprocessing import Process, Event, freeze_support, SimpleQueue, Value
 from imutils import face_utils
 from threading import Thread
 from enum import Enum, auto
@@ -180,6 +180,7 @@ class VideoRecorder(Process):
         self.video_timeline = None
         self.video_cap = None
         self.video_out = None
+        self.val = Value('i', 0, lock=True)
 
     def signal_handler(self, sig, frame):
         if sig == signal.SIGINT:
@@ -200,6 +201,13 @@ class VideoRecorder(Process):
     def finish(self, timeout=None):
         self.event.clear()
         self.event.wait(timeout=timeout)
+
+    def setFrameCount(self):
+        with self.val.get_lock():
+            self.val.value = 0
+
+    def getFrameCount(self):
+        return self.val.value
 
     def run(self) -> None:
         self.output = open("./output/video_timeline.txt", 'w')
@@ -226,6 +234,8 @@ class VideoRecorder(Process):
             if ret and frame is not None:
                 self.video_out.write(frame)
                 self.output.write("%f\n" % curr_time)
+                with self.val.get_lock():
+                    self.val.value += 1
 
         self.output.write("%f,end" % time.time())
         self.video_out.release()
@@ -406,17 +416,6 @@ class ExpApp(QMainWindow):
         else:
             self.log("focus,True")
 
-    def paintEvent(self, event):
-        qp = QPainter(self)
-        if self._state == self.State.CALIBRATION:
-            if 0 < self.pos <= len(self.calib_position_center):
-                qp.setBrush(QColor(180, 0, 0))
-                qp.setPen(QPen(QColor(180, self.calib_r, self.calib_r), 1))
-                x, y = self.calib_position_center[self.pos-1]
-                r = self.calib_r
-                qp.drawEllipse(x-r, y-r, 2*r, 2*r)
-        qp.end()
-
     def closeEvent(self, event):
         self.log("click,x")
         self.close()
@@ -476,7 +475,8 @@ class ExpApp(QMainWindow):
         # taskbar.hide_taskbar()
 
         # Debugging options (Disable camera setting & calibration)
-        self._debug = False
+        self._skip_camera = True
+        self._skip_calib = True
 
         self.videos = [
             # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
@@ -486,8 +486,8 @@ class ExpApp(QMainWindow):
             # ("AI-For-Everyone",             "https://youtu.be/bBaZ05WsTUM", "https://forms.gle/1cLrxunMHAXBktVL8"),  # 11m
             # ("Game-Theory",                 "https://youtu.be/o5vvcohd1Qg", "https://forms.gle/83ixrQgC86xczpfV8"),  # 10m
             # ("Cryptography-I",              "https://youtu.be/XnueMv0EUHQ", "https://forms.gle/t28mL8xmZSabigSe9")   # 15m
-            ("Pre-video", "https://youtu.be/-MTMhfmh-jM"),
-            ("Main-video", "https://youtu.be/0G6jDukKeNA")
+            ("Pre-video", "https://youtu.be/d9Aza6ruvJE"),
+            ("Main-video", "https://youtu.be/L7n1U9l3ll4")
         ]
         self.videoIndex = 0
 
@@ -636,23 +636,21 @@ class ExpApp(QMainWindow):
                 instruction_layout = QVBoxLayout(self)
 
                 detail_text = QLabel(
-                    'Now, you will proceed\n\n'
-                    '1) Setting proper camera angle & distance,\n\n'
-                    '2) Perform an iteration of "Looking at a circle" -> "Clicking the circle",\n'
-                    '   (Please do not move your head during the step)\n\n',
+                    'Now, you will proceed an iteration of "Looking at a circle" -> "Clicking the circle".\n\n'
+                    '- Please do not move your head during the step.\n\n'
+                    '- You may need to click multiples times.',
                     self
                 )
                 detail_text.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Minimum)
                 detail_text.setContentsMargins(10, 10, 10, 10)
 
-                start_button = QPushButton('Next', self)
-                start_button.setFixedSize(758, 50)
-                start_button.clicked.connect(self.proceed)
+                self.start_calib_button = QPushButton('Next', self)
+                self.start_calib_button.setFixedSize(758, 50)
 
                 instruction_layout.addStretch(10)
                 instruction_layout.addWidget(detail_text, 0, alignment=Qt.AlignHCenter)
                 instruction_layout.addStretch(1)
-                instruction_layout.addWidget(start_button, 0, alignment=Qt.AlignHCenter)
+                instruction_layout.addWidget(self.start_calib_button, 0, alignment=Qt.AlignHCenter)
                 instruction_layout.addStretch(10)
 
                 self.calib_instruction_widget.setLayout(instruction_layout)
@@ -833,6 +831,8 @@ class ExpApp(QMainWindow):
             self.margin = 0
             self.calib_r = 50
             self.pos = 0
+            self.clicks = 0
+            self.calib_started = False
             self.calib_position_center: List[Tuple[int, int]] = [(0, 0)]
 
         self._state = self.State.SET_DISTRACTION
@@ -870,7 +870,7 @@ class ExpApp(QMainWindow):
     def set_notification(self):
         return
 
-    @proceedFunction(State.SET_PARAMETERS, State.CALIB_INSTRUCTION)
+    @proceedFunction(State.SET_PARAMETERS, State.SET_CAMERA)
     def initialize(self):
         self.noti_proceed.setDisabled(True)
 
@@ -929,15 +929,9 @@ class ExpApp(QMainWindow):
             (self.rect().width() - self.calib_r, self.rect().height() - self.calib_r),
         ]
 
-    @proceedFunction(State.CALIB_INSTRUCTION, None)  # Next: SET_CAMERA
-    def set_instruction(self):
-        self.widget.setCurrentWidget(self.calib_instruction_widget)
-        self._state = self.State.SET_CAMERA
-        pass
-
-    @proceedFunction(State.SET_CAMERA, None)  # Next: CALIBRATION
+    @proceedFunction(State.SET_CAMERA, None)  # Next: CALIB_INSTRUCTION
     def set_camera(self):
-        if not self._debug:
+        if not self._skip_camera:
             self.camera_finish_button.setDisabled(True)
         self.widget.setCurrentWidget(self.camera_setting_widget)
 
@@ -987,7 +981,7 @@ class ExpApp(QMainWindow):
                             img = cv2.circle(img, rect_center, 1, (255, 0, 0), -1)
                             if x_d >= t_size and distance2(rect_center, (int(w/2), int(h/2))) < (t_size/3)**2:
                                 self.camera_finish_button.setEnabled(True)
-                                success.set()
+                                success.setFrameCount()
 
                         # Draw target box
                         img = cv2.rectangle(img, (int((w-t_size)/2), int((h-t_size)/2)),
@@ -1012,12 +1006,12 @@ class ExpApp(QMainWindow):
         frame_thread.start()
 
         def camera_finished_wrapper():
-            if success.is_set() or self._debug:
+            if success.is_set() or self._skip_camera:
                 self.camera_finished(frame_thread, cap)
 
         self.camera_finish_button.clicked.connect(camera_finished_wrapper)
 
-    @proceedFunction(State.SET_CAMERA, State.CALIBRATION)
+    @proceedFunction(State.SET_CAMERA, State.CALIB_INSTRUCTION)
     def camera_finished(self, frame_thread, cap):
         self.camera_running.set()
 
@@ -1030,28 +1024,57 @@ class ExpApp(QMainWindow):
         self.videoRecorder.start()
         self.videoRecorder.execute()
 
+    @proceedFunction(State.CALIB_INSTRUCTION, None)  # Next: CALIBRATION
+    def set_instruction(self):
+        self.widget.setCurrentWidget(self.calib_instruction_widget)
+
+        def set_instruction_finished_wrapper():
+            self.set_instruction_finished()
+
+        self.start_calib_button.clicked.connect(set_instruction_finished_wrapper)
+
+    @proceedFunction(State.CALIB_INSTRUCTION, State.CALIBRATION)
+    def set_instruction_finished(self):
         self.widget.setCurrentWidget(self.calibration_widget)
+
+    def paintEvent(self, event):
+        qp = QPainter(self)
+        if self._state == self.State.CALIBRATION:
+            if 0 <= self.pos < len(self.calib_position_center):
+                qp.setBrush(QColor(180, 0, 0))
+                qp.setPen(QPen(QColor(180, self.calib_r, self.calib_r), 1))
+                x, y = self.calib_position_center[self.pos]
+                r = self.calib_r
+                qp.drawEllipse(x-r, y-r, 2*r, 2*r)
+        qp.end()
 
     @proceedFunction(State.CALIBRATION, None)  # Next: LECTURE_INSTRUCTION
     def calibrate(self):
         self.log("calibrate,%d" % self.pos)
 
-        if self.pos >= len(self.calib_position_center):
-            self.ellipse_button.hide()
-            self.end_calibrate()
-            return
-        else:
-            self.ellipse_button.move(self.calib_position_center[self.pos][0] - self.calib_r,
-                                     self.calib_position_center[self.pos][1] - self.calib_r)
-
-        if self._debug:
+        if self._skip_calib:
             self.pos = len(self.calib_position_center) + 1
             self.ellipse_button.hide()
             self.end_calibrate()
             return
+
+        if self.clicks == 0:  # First click on the point
+            self.videoRecorder.setFrameCount()
+            self.clicks += 1
+        elif self.videoRecorder.getFrameCount() < 15:
+            self.clicks += 1
         else:
+            self.clicks = 0
             self.pos += 1
-            self.update()
+
+        if self.pos >= len(self.calib_position_center):
+            self.ellipse_button.hide()
+            self.end_calibrate()
+            return
+
+        self.ellipse_button.move(self.calib_position_center[self.pos][0] - self.calib_r,
+                                 self.calib_position_center[self.pos][1] - self.calib_r)
+        self.update()
 
     @proceedFunction(State.CALIBRATION, State.LECTURE_INSTRUCTION)
     def end_calibrate(self):
