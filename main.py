@@ -114,7 +114,7 @@ class ProbeRunner(QThread):
         self.end_event.wait(timeout=timeout)
 
     def run(self) -> None:
-        output = open("./output/probe_%s.txt" % self.video, 'w')
+        output = open("./output/probe_%s.txt" % self.video, 'w', buffering=1, encoding='UTF-8')
 
         self.event.wait()
 
@@ -210,7 +210,7 @@ class VideoRecorder(Process):
         return self.val.value
 
     def run(self) -> None:
-        self.output = open("./output/video_timeline.txt", 'w')
+        self.output = open("./output/video_timeline.txt", 'w', buffering=1, encoding='UTF-8')
 
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTERM, self.signal_handler)
@@ -253,9 +253,17 @@ class ActivityRecorder(Process):
         self.name = name
 
     def signal_handler(self, sig, frame):
-        self.keyboard_listener.stop()
-        self.mouse_listener.stop()
-        self.output.close()
+        try:
+            self.keyboard_listener.stop()
+            self.mouse_listener.stop()
+        except Exception as e:
+            print(e)
+
+        try:
+            self.keyboard_output.close()
+            self.mouse_output.close()
+        except Exception as e:
+            print(e)
 
         if sig == signal.SIGINT:
             traceback.print_stack(frame)
@@ -286,10 +294,10 @@ class ActivityRecorder(Process):
         self.mouse_log("mouse,scroll,%d,%d,%d,%d" % (x, y, dx, dy))
 
     def onKeyPress(self, key):
-        self.key_log("key,press,%s" % key)
+        self.key_log("key,press,%s" % str(key))
 
     def onKeyRelease(self, key):
-        self.key_log("key,release,%s" % key)
+        self.key_log("key,release,%s" % str(key))
         curr_time = time.time()
         if isinstance(key, keyboard.KeyCode):
             if key in [keyboard.KeyCode.from_char('f'), keyboard.KeyCode.from_char('F'), keyboard.KeyCode.from_char('ㄹ')]:
@@ -298,10 +306,13 @@ class ActivityRecorder(Process):
             elif key in [keyboard.KeyCode.from_char('n'), keyboard.KeyCode.from_char('N'), keyboard.KeyCode.from_char('ㅜ')]:
                 self.queue.put((curr_time, 'n'))
                 sound.play("./resources/Keyboard.mp3")
+        elif key == keyboard.Key.space:
+            self.queue.put((curr_time, 'p'))
+            sound.play("./resources/Keyboard.mp3")
 
     def run(self) -> None:
-        self.keyboard_output = open("output/keyboard_log_%s.txt" % self.name, 'w')
-        self.mouse_output = open("output/mouse_log_%s.txt" % self.name, 'w')
+        self.mouse_output = open("output/mouse_log_%s.txt" % self.name, 'w', buffering=1, encoding='UTF-8')
+        self.keyboard_output = open("output/keyboard_log_%s.txt" % self.name, 'w', buffering=1, encoding='UTF-8')
 
         self.mouse_listener = mouse.Listener(
             on_move=self.onMouseMove,
@@ -324,11 +335,11 @@ class ActivityRecorder(Process):
         self.event.clear()
         self.event.wait()
 
-        self.keyboard_listener.stop()
         self.mouse_listener.stop()
+        self.keyboard_listener.stop()
 
-        self.keyboard_output.close()
         self.mouse_output.close()
+        self.keyboard_output.close()
 
         self.finishEvent.set()
 
@@ -491,7 +502,7 @@ class ExpApp(QMainWindow):
         ]
         self.videoIndex = 0
 
-        self.output = open("output/main_log.txt", 'w')
+        self.output = open("output/main_log.txt", 'w', buffering=1, encoding='UTF-8')
         self.camera = camera.select_camera("output/test.png")
         if self.camera is None:
             self.log("cameraNotFound")
@@ -582,8 +593,9 @@ class ExpApp(QMainWindow):
 
                 noti_text = QLabel(
                     'Thank you for your participation in the project.\n'
-                    'Your participation will help to improve the understanding of online learning.\n\n'
-                    'Please disable every external distractions:\n\n'
+                    'Your participation will help to improve the understanding of online learning.\n'
+                    'Please make sure you completed pre-experiment survey and pre-quiz.\n\n'
+                    'Please disable every external distractions:\n'
                     '- Mute your phone, tablet, etc.\n'
                     '- Disable notifications from Messenger programs (Slack, KakaoTalk, etc.)\n'
                     '- Disconnect every external monitor (if you are connected)\n'
@@ -675,12 +687,14 @@ class ExpApp(QMainWindow):
                 lecture_text = QLabel(
                     'Now, you will watch one short + one long lecture and take a quiz at the end.\n\n'
                     '-----------------------------------------IMPORTANT-----------------------------------------\n\n'
-                    'During the lecture, you will hear the "Beep" sound periodically.\n\n'
+                    'During the lecture, you will hear the "beep" sound periodically.\n\n'
                     'When you hear the sound, based on your state JUST BEFORE hearing the sound:\n\n'
                     '- Press [F]: if you were Focusing (thinking of anything related to the lecture)\n\n'
                     '- Press [N]: if you were Not focusing (thinking or doing something unrelated)\n\n'
-                    'Please report as honest as you can; this will not affect your monetary reward.\n\n\n'
-                    'During the experiment, please avoid moving laptop and touching eyeglasses.\n\n'
+                    '- Press [X]: if you cannot decide and you want to skip\n\n'
+                    'Please report as fast and honest as you can; this will NOT affect your monetary reward.\n\n'
+                    'If you think you had mispressed, then just press again.\n\n\n'
+                    'During the experiment, please avoid moving laptop or touching eyeglasses.\n\n'
                     '----------------------------------------------------------------------------------------------------\n\n'
                     'Please adjust your system volume to make sure you hear the beep sound.',
                     self
@@ -750,7 +764,7 @@ class ExpApp(QMainWindow):
 
                 vlc_lower_layout.addStretch(1)
 
-                self.probe_text = 'ON-FOCUS: PRESS [F] / OFF-FOCUS: PRESS [N]'
+                self.probe_text = 'FOCUSED: [F] / NOT FOCUSED: [N] / SKIP: [X]'
                 self.probe_label = QLabel(self.probe_text)
                 font: QFont = self.probe_label.font()
                 font.setFamily('Roboto')
@@ -981,7 +995,7 @@ class ExpApp(QMainWindow):
                             img = cv2.circle(img, rect_center, 1, (255, 0, 0), -1)
                             if x_d >= t_size and distance2(rect_center, (int(w/2), int(h/2))) < (t_size/3)**2:
                                 self.camera_finish_button.setEnabled(True)
-                                success.setFrameCount()
+                                success.set()
 
                         # Draw target box
                         img = cv2.rectangle(img, (int((w-t_size)/2), int((h-t_size)/2)),
@@ -1182,10 +1196,10 @@ if __name__ == '__main__':
     if not os.path.exists('output'):
         os.mkdir('output')
 
-    with open('./output/stdout.txt', 'w') as stdout:
+    with open('./output/stdout.txt', 'w', buffering=1, encoding='UTF-8') as stdout:
         sys.stdout = stdout
 
-        with open('./output/stderr.txt', 'w') as stderr:
+        with open('./output/stderr.txt', 'w', buffering=1, encoding='UTF-8') as stderr:
             sys.stderr = stderr
 
             # Pyinstaller fix
