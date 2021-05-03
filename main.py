@@ -465,7 +465,7 @@ class ExpApp(QMainWindow):
 
         self.output.close()
 
-        os.system("start https://forms.gle/UUVqMUMvwvGFKSet6")
+        # os.system("start https://forms.gle/UUVqMUMvwvGFKSet6")
         # taskbar.unhide_taskbar()
         exit(0)
 
@@ -475,8 +475,8 @@ class ExpApp(QMainWindow):
         # taskbar.hide_taskbar()
 
         # Debugging options (Disable camera setting & calibration)
-        self._skip_camera = True
-        self._skip_calib = True
+        self._skip_camera = False
+        self._skip_calib = False
 
         self.videos = [
             # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
@@ -673,12 +673,12 @@ class ExpApp(QMainWindow):
                 instruction_layout = QVBoxLayout(self)
 
                 lecture_text = QLabel(
-                    'Now, you will watch one short + one long lecture and TAKE A QUIZ at the end.\n\n'
+                    'Now, you will watch one short + one long lecture and take a quiz at the end.\n\n'
                     '-----------------------------------------IMPORTANT-----------------------------------------\n\n'
                     'During the lecture, you will hear the "Beep" sound periodically.\n\n'
-                    'When you hear the sound, based on your state just before hearing the sound,\n\n'
-                    '- Press [F]: if you were on-focus (thinking of anything related to the lecture)\n\n'
-                    '- Press [N]: if you were off-focus (thinking or doing something unrelated)\n\n'
+                    'When you hear the sound, based on your state JUST BEFORE hearing the sound:\n\n'
+                    '- Press [F]: if you were Focusing (thinking of anything related to the lecture)\n\n'
+                    '- Press [N]: if you were Not focusing (thinking or doing something unrelated)\n\n'
                     'Please report as honest as you can; this will not affect your monetary reward.\n\n\n'
                     'During the experiment, please avoid moving laptop and touching eyeglasses.\n\n'
                     '----------------------------------------------------------------------------------------------------\n\n'
