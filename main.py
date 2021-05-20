@@ -600,6 +600,7 @@ class ExpApp(QMainWindow):
                     '- Disable notifications from Messenger programs (Slack, KakaoTalk, etc.)\n'
                     '- Disconnect every external monitor (if you are connected)\n'
                     '- Please do not let others disturb you\n'
+                    '- (Mac) In the control center, click 🌙 (moon) icon, and turn on do-not-disturb mode for at least 2 hours.\n'
                     '- (Windows) Disable notification as below image'
                     , self
                 )
@@ -610,7 +611,7 @@ class ExpApp(QMainWindow):
                 noti_image.setFixedSize(758, 270)
                 noti_image.setPixmap(QPixmap("./resources/focus_assistant.png"))
 
-                noti_open = QPushButton('Open Settings (Only Windows for now)')
+                noti_open = QPushButton('Open Settings (Only Windows)')
                 noti_open.setFixedSize(758, 50)
                 noti_open.clicked.connect(notification.open_settings)
 
@@ -685,16 +686,16 @@ class ExpApp(QMainWindow):
                 instruction_layout = QVBoxLayout(self)
 
                 lecture_text = QLabel(
-                    'Now, you will watch one short + one long lecture and take a quiz at the end.\n\n'
+                    'Now, you will watch one short + one long lecture.\n\n'
                     '-----------------------------------------IMPORTANT-----------------------------------------\n\n'
-                    'During the lecture, you will hear the "beep" sound periodically.\n\n'
+                    'During the experiment, please avoid moving laptop or touching eyeglasses.\n\n'
+                    'During the lecture, you will periodically hear the "beep" sound.\n\n'
                     'When you hear the sound, based on your state JUST BEFORE hearing the sound:\n\n'
                     '- Press [F]: if you were Focusing (thinking of anything related to the lecture)\n\n'
-                    '- Press [N]: if you were Not focusing (thinking or doing something unrelated)\n\n'
-                    '- Press [X]: if you cannot decide and you want to skip\n\n'
-                    'Please report as fast and honest as you can; this will NOT affect your monetary reward.\n\n'
-                    'If you think you had mispressed, then just press again.\n\n\n'
-                    'During the experiment, please avoid moving laptop or touching eyeglasses.\n\n'
+                    '- Press [N]: if you were NOT focusing (thinking or doing something unrelated to the lecture)\n\n'
+                    '- Press [X]: if you cannot decide\n\n'
+                    'Please report as promptly and honestly as you can; this will NOT affect your monetary reward.\n\n'
+                    'If you pressed the wrong key, then just press again.\n\n\n'
                     '----------------------------------------------------------------------------------------------------\n\n'
                     'Please adjust your system volume to make sure you hear the beep sound.',
                     self
