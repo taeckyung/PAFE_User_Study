@@ -818,8 +818,7 @@ class ExpApp(QMainWindow):
             if True:
                 finish_layout = QVBoxLayout(self)
                 self.finish_text = 'Thank you for the participation!\n'\
-                                   'Please do not forget to submit the result :)\n\n'\
-                                   'Your PARTICIPANT_ID is [%s]'
+                                   'Please do not forget to submit the result :)\n\n'
                 self.finish_label = QLabel(self.finish_text)
                 self.finish_label.setAlignment(Qt.AlignCenter)
                 self.finish_label.setFixedHeight(200)
