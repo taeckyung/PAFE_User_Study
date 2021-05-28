@@ -512,8 +512,8 @@ class ExpApp(QMainWindow):
         # taskbar.hide_taskbar()
 
         # Debugging options (Disable camera setting & calibration)
-        self._skip_camera = True
-        self._skip_calib = True
+        self._skip_camera = False
+        self._skip_calib = False
 
         self.videos = [
             ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
@@ -678,7 +678,7 @@ class ExpApp(QMainWindow):
                 instruction_layout = QVBoxLayout(self)
 
                 detail_text = QLabel(
-                    'Now, you will proceed an iteration of "Looking at a circle" -> "Clicking the circle".\n\n'
+                    'Now, you will proceed an loop of "Looking at a circle" -> "Clicking the circle".\n\n'
                     '- Please do not move your head during the step.\n\n'
                     '- You may need to click multiples times.',
                     self
@@ -1023,13 +1023,13 @@ class ExpApp(QMainWindow):
                         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
                         rect = detector(gray, 1)
                         h, w, c = img.shape
-                        t_size = w/4  # target size
+                        t_size = w/5  # target size
                         if len(rect) > 0:
                             (x, y, x_d, y_d) = face_utils.rect_to_bb(rect[0])
                             img = cv2.rectangle(img, (x, y), (x+x_d, y+y_d), (255, 0, 0), 2)
                             rect_center = (x+int(x_d/2), y+int(y_d/2))
                             img = cv2.circle(img, rect_center, 1, (255, 0, 0), -1)
-                            if x_d >= t_size and distance2(rect_center, (int(w/2), int(h/2))) < (t_size/3)**2:
+                            if x_d >= t_size and distance2(rect_center, (int(w/2), int(h/2))) < (t_size/4)**2:
                                 self.camera_finish_button.setEnabled(True)
                                 success.set()
 
