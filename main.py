@@ -516,16 +516,16 @@ class ExpApp(QMainWindow):
         self._skip_calib = False
 
         self.videos = [
-            ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
-            ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
+            ("Pre-video", "https://youtu.be/d9Aza6ruvJE"),
+            ("Main-video", "https://youtu.be/L7n1U9l3ll4"),
+            # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
+            # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
             # ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00", "https://forms.gle/fsq9JoA3uQW1XVsL8"),  # 11m; pre-video
             # ("Intro-to-Forensic-Science",   "https://youtu.be/FmPBNPFwiws", "https://forms.gle/DBgafv1NRG6PbRuh8"),  # 12m
             # ("Intro-to-Economic-Theories",  "https://youtu.be/8yM_vw9xKnQ", "https://forms.gle/BL1siLNCM5WaaLWm8"),  # 12m
             # ("AI-For-Everyone",             "https://youtu.be/bBaZ05WsTUM", "https://forms.gle/1cLrxunMHAXBktVL8"),  # 11m
             # ("Game-Theory",                 "https://youtu.be/o5vvcohd1Qg", "https://forms.gle/83ixrQgC86xczpfV8"),  # 10m
             # ("Cryptography-I",              "https://youtu.be/XnueMv0EUHQ", "https://forms.gle/t28mL8xmZSabigSe9")   # 15m
-            # ("Pre-video", "https://youtu.be/d9Aza6ruvJE"),
-            # ("Main-video", "https://youtu.be/L7n1U9l3ll4")
         ]
         self.videoIndex = 0
 
@@ -723,7 +723,7 @@ class ExpApp(QMainWindow):
                     '- Press [F]: if you were Focusing (thinking of anything related to the lecture)\n\n'
                     '- Press [N]: if you were NOT focusing (thinking or doing something unrelated to the lecture)\n\n'
                     '- Press [SpaceBar]: if you cannot decide\n\n'
-                    'Please report as promptly and honestly as you can; this will NOT affect your monetary reward.\n\n'
+                    'Please report as promptly and honestly as you can; your report will NOT affect your monetary reward.\n\n'
                     'If you pressed the wrong key, then just press again.\n\n\n'
                     '----------------------------------------------------------------------------------------------------\n\n'
                     'Please adjust your system volume to make sure you hear the beep sound.',
