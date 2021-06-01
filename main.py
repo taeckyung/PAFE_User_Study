@@ -512,12 +512,12 @@ class ExpApp(QMainWindow):
         # taskbar.hide_taskbar()
 
         # Debugging options (Disable camera setting & calibration)
-        self._skip_camera = False
-        self._skip_calib = False
+        self._skip_camera = True
+        self._skip_calib = True
 
         self.videos = [
-            ("Pre-video", "https://youtu.be/d9Aza6ruvJE"),
-            ("Main-video", "https://youtu.be/L7n1U9l3ll4"),
+            ("Pre-video", "./resources/pre-video.webm"),
+            ("Main-video", "./resources/main-video.webm"),
             # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
             # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
             # ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00", "https://forms.gle/fsq9JoA3uQW1XVsL8"),  # 11m; pre-video
