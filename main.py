@@ -23,7 +23,7 @@ import os
 
 from typing import List, Tuple
 
-from utils import vlc, parsing, camera, sound, notification
+from utils import vlc, camera, sound, notification
 
 def getResource(name):
     if sys.platform=="darwin":
@@ -496,7 +496,10 @@ class ExpApp(QMainWindow):
             self.log(str(e))
 
         try:
-            shutil.make_archive(os.path.join("./", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
+            if sys.platform == "darwin":
+                shutil.make_archive(os.path.join("../../../", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
+            else:
+                shutil.make_archive(os.path.join("./", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
         except Exception as e:
             self.log(str(e))
 
@@ -512,12 +515,14 @@ class ExpApp(QMainWindow):
         # taskbar.hide_taskbar()
 
         # Debugging options (Disable camera setting & calibration)
-        self._skip_camera = True
-        self._skip_calib = True
+        self._skip_camera = False
+        self._skip_calib = False
 
         self.videos = [
-            ("Pre-video", "./resources/pre-video.webm"),
-            ("Main-video", "./resources/main-video.webm"),
+            #("Pre-video", "./resources/pre-video.webm"),
+            #("Main-video", "./resources/main-video.webm"),
+            ("Pre-video", getResource("pre-video.webm")),
+            ("Main-video", getResource("main-video.webm")),
             # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
             # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
             # ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00", "https://forms.gle/fsq9JoA3uQW1XVsL8"),  # 11m; pre-video
@@ -1184,7 +1189,8 @@ class ExpApp(QMainWindow):
         self.probeRunner.signal.connect(self.showDialog)
         self.probeRunner.ui_signal.connect(self.updater.alertProbeRunnerFinished)
 
-        url = parsing.get_best_url(self.videos[self.videoIndex][1])
+        #url = parsing.get_best_url(self.videos[self.videoIndex][1])
+        url = self.videos[self.videoIndex][1]
         self.log("url,%s" % url)
         try:
             media = self.instance.media_new(url)
@@ -1204,11 +1210,14 @@ class ExpApp(QMainWindow):
             screen = qApp.primaryScreen()
             dpi = screen.physicalDotsPerInch()
             full_screen = screen.size()
-
+            scale = 0
+            
+            self.media_player.video_set_scale(min(float(full_screen.width())/960.0, float(full_screen.height())/540))
             if self.media_player.play() < 0:  # Failed to play the media
                 self.log("play,%s,Fail" % self.videos[self.videoIndex][0])
             else:
                 self.log("play,%s,Start" % self.videos[self.videoIndex][0])
+                
                 while(self.media_player.get_state() != vlc.State.Playing):
                     time.sleep(0.1)
                 self.showFullScreen()
