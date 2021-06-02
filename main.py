@@ -482,6 +482,7 @@ class ExpApp(QMainWindow):
             self.log(str(e))
 
         try:
+            self.videoRecorder.finish(timeout=10.0)
             self.videoRecorder.join()
             #self.videoRecorder.join(timeout=2.0)
             #self.videoRecorder.terminate()
@@ -489,6 +490,7 @@ class ExpApp(QMainWindow):
             self.log(str(e))
 
         try:
+            self.activityRecorder.finish(timeout=3.0)
             self.activityRecorder.join()
             #self.activityRecorder.join(timeout=2.0)
             #self.activityRecorder.terminate()
