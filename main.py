@@ -7,9 +7,6 @@ from PyQt5.QtGui import *
 from pynput import mouse, keyboard
 import cv2
 
-from AppKit import NSScreen, NSDeviceSize, NSDeviceResolution
-from Quartz import CGDisplayScreenSize
-
 from multiprocessing import Process, Event, freeze_support, SimpleQueue, Value
 from imutils import face_utils
 from threading import Thread
@@ -770,12 +767,8 @@ class ExpApp(QMainWindow):
                 vlc_layout = QVBoxLayout(self)
                 # VLC player
                 # In this widget, the video will be drawn
-                if sys.platform == "darwin":  # for MacOS
-                    #from PyQt5.QtWidgets import QMacCocoaViewContainer
-                    #self.video_frame = QMacCocoaViewContainer(0)
-                    self.video_frame = QFrame()
-                else:
-                    self.video_frame = QFrame()
+                self.video_frame = QFrame()
+
                 palette = self.video_frame.palette()
                 palette.setColor(QPalette.Window, QColor(255, 255, 255))
                 self.video_frame.setPalette(palette)
@@ -1006,9 +999,16 @@ class ExpApp(QMainWindow):
                 success = False
 
         if not success:
-            self.camera_finish_button.setDisabled(True)
+            self.camera_finish_button.setText("Quit")
+            def quick_exit():
+                exit(0)
+            self.camera_finish_button.clicked.connect(quick_exit)
+            self.camera_finish_button.setEnabled(True)
             self.log("setMonitor,fail")
-            self.camera_label.setText("No Camera Detected")
+            self.camera_label.setText("No Camera Detected.\n\nPlease check if\n"
+                                      " - Camera is properly connected.\n"
+                                      " - (Mac) You allowed camera permission.\n"
+                                      " - (Windows) No other app is using camera.")
             return
 
         width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
@@ -1039,7 +1039,7 @@ class ExpApp(QMainWindow):
                             img = cv2.rectangle(img, (x, y), (x+x_d, y+y_d), (255, 0, 0), 2)
                             rect_center = (x+int(x_d/2), y+int(y_d/2))
                             img = cv2.circle(img, rect_center, 1, (255, 0, 0), -1)
-                            if x_d >= t_size and distance2(rect_center, (int(w/2), int(h/2))) < (t_size/4)**2:
+                            if x_d >= t_size and distance2(rect_center, (int(w/2), int(h/2))) < t_size**2:
                                 self.camera_finish_button.setEnabled(True)
                                 success.set()
 
@@ -1211,18 +1211,8 @@ class ExpApp(QMainWindow):
             self.probeRunner.execute()  # Start sound player
             self.updater.execute()  # Start UI updater
             self.video_frame.show()
-            
-            screen = NSScreen.mainScreen()
-            description = screen.deviceDescription()
-            pw, ph = description[NSDeviceSize].sizeValue()
-            rx, ry = description[NSDeviceResolution].sizeValue()
-            mmw, mmh = CGDisplayScreenSize(description["NSScreenNumber"])
-            scaleFactor = screen.backingScaleFactor()
-            pw *= scaleFactor
-            ph *= scaleFactor
-            self.log(f"display: {mmw:.1f}×{mmh:.1f} mm; {pw:.0f}×{ph:.0f} pixels; {rx:.0f}×{ry:.0f} dpi")
 
-
+            pw, ph = self.getScreenSize()
             #dpi = screen.physicalDotsPerInch()
             #full_screen = screen.size()
             #width_scale = float(full_screen.width())/960.0
@@ -1248,6 +1238,24 @@ class ExpApp(QMainWindow):
         finally:
             self.videoIndex += 1
             self._state = self.State.MAIN_VIDEO
+
+    def getScreenSize(self):
+        if sys.platform == 'darwin':
+            from AppKit import NSScreen, NSDeviceSize, NSDeviceResolution
+            from Quartz import CGDisplayScreenSize
+            screen = NSScreen.mainScreen()
+            description = screen.deviceDescription()
+            pw, ph = description[NSDeviceSize].sizeValue()
+            rx, ry = description[NSDeviceResolution].sizeValue()
+            mmw, mmh = CGDisplayScreenSize(description["NSScreenNumber"])
+            scaleFactor = screen.backingScaleFactor()
+            pw *= scaleFactor
+            ph *= scaleFactor
+            self.log(f"display: {mmw:.1f}×{mmh:.1f} mm; {pw:.0f}×{ph:.0f} pixels; {rx:.0f}×{ry:.0f} dpi")
+            return pw, ph
+        else:
+            return self.rect().width(), self.rect().height()
+
 
     @proceedFunction(State.MAIN_VIDEO, State.FINISH)
     def finishVideo(self):
