@@ -13,6 +13,8 @@ setup(name="Online-experiment",
               "packages": ["vlc"],
               "includes": ["PyQt5",
                            "PyQt5.QtWidgets",
+                           "Quartz",
+                           "AppKit",
                            "pynput.keyboard._darwin",
                            "pynput.mouse._darwin",
                            "multiprocessing.Event",
@@ -24,6 +26,7 @@ setup(name="Online-experiment",
                            "dlib",
                            "scipy",
                            "numpy",
+                           "cv2",
                            "pafy"]
           }
       })

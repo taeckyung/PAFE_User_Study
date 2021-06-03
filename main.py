@@ -7,6 +7,9 @@ from PyQt5.QtGui import *
 from pynput import mouse, keyboard
 import cv2
 
+from AppKit import NSScreen, NSDeviceSize, NSDeviceResolution
+from Quartz import CGDisplayScreenSize
+
 from multiprocessing import Process, Event, freeze_support, SimpleQueue, Value
 from imutils import face_utils
 from threading import Thread
@@ -1207,12 +1210,28 @@ class ExpApp(QMainWindow):
             self.updater.execute()  # Start UI updater
             self.video_frame.show()
             
-            screen = qApp.primaryScreen()
-            dpi = screen.physicalDotsPerInch()
-            full_screen = screen.size()
-            scale = 0
-            
-            self.media_player.video_set_scale(min(float(full_screen.width())/960.0, float(full_screen.height())/540))
+            screen = NSScreen.mainScreen()
+            description = screen.deviceDescription()
+            pw, ph = description[NSDeviceSize].sizeValue()
+            rx, ry = description[NSDeviceResolution].sizeValue()
+            mmw, mmh = CGDisplayScreenSize(description["NSScreenNumber"])
+            scaleFactor = screen.backingScaleFactor()
+            pw *= scaleFactor
+            ph *= scaleFactor
+            self.log(f"display: {mmw:.1f}×{mmh:.1f} mm; {pw:.0f}×{ph:.0f} pixels; {rx:.0f}×{ry:.0f} dpi")
+
+
+            #dpi = screen.physicalDotsPerInch()
+            #full_screen = screen.size()
+            #width_scale = float(full_screen.width())/960.0
+            #height_scale = float(full_screen.height())/540.0
+            width_scale = float(pw)/960.0
+            height_scale = float(ph)/540.0
+            scale = min(width_scale, height_scale)
+            #self.log("Screen resolution: %d x %d" %(full_screen.width(), full_screen.height()))
+            #self.log("Width scale: %f\nHeight scale: %f\nFinalized scale: %f" %(width_scale, height_scale, scale))
+            #self.media_player.video_set_scale(min(float(full_screen.width())/960.0, float(full_screen.height())/540.0))
+            self.media_player.video_set_scale(scale)
             if self.media_player.play() < 0:  # Failed to play the media
                 self.log("play,%s,Fail" % self.videos[self.videoIndex][0])
             else:
