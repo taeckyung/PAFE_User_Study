@@ -651,7 +651,7 @@ class ExpApp(QMainWindow):
                 noti_open.setFixedSize(758, 50)
                 noti_open.clicked.connect(notification.open_settings)
 
-                type_student_id_text = QLabel('Type your STUDENT_ID below.')
+                type_student_id_text = QLabel('Type your Phone Number below.')
                 type_student_id_text.setFixedHeight(75)
 
                 self.user_id = QLineEdit(self)
