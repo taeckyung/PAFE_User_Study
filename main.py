@@ -498,11 +498,21 @@ class ExpApp(QMainWindow):
 
         try:
             if sys.platform == "darwin":
-                shutil.make_archive(os.path.join("../../../", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
-                shutil.make_archive(os.path.join("./", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
+                output_name = os.path.join("../../../", "output_user_%s" % self.user_id.text())
+                save_idx = 0
+                while os.path.isfile(output_name+".zip"):
+                    save_idx += 1
+                    output_name = output_name.split("(")[0] + ("(%d)" % save_idx)
+                shutil.make_archive(output_name, 'zip', "./output/")
 
-            else:
-                shutil.make_archive(os.path.join("./", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
+            
+            output_name = os.path.join("./", "output_user_%s" % self.user_id.text())
+            save_idx = 0
+            while os.path.isfile(output_name+".zip"):
+                save_idx += 1
+                output_name = output_name.split("(")[0] + ("(%d)" % save_idx)
+            shutil.make_archive(output_name, 'zip', "./output/")
+            #shutil.make_archive(os.path.join("./", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
         except Exception as e:
             self.log(str(e))
 
@@ -1002,7 +1012,7 @@ class ExpApp(QMainWindow):
         if not success:
             self.camera_finish_button.setText("Quit")
             def quick_exit():
-                exit(0)
+                sys.exit(0)
             self.camera_finish_button.clicked.connect(quick_exit)
             self.camera_finish_button.setEnabled(True)
             self.log("setMonitor,fail")
