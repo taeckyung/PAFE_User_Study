@@ -350,7 +350,6 @@ class ActivityRecorder(Thread):
         #signal.signal(signal.SIGINT, self.signal_handler)
         #signal.signal(signal.SIGTERM, self.signal_handler)
         '''
-        print(4)
         self.event.wait()
 
         self.mouse_listener.start()
@@ -500,6 +499,8 @@ class ExpApp(QMainWindow):
         try:
             if sys.platform == "darwin":
                 shutil.make_archive(os.path.join("../../../", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
+                shutil.make_archive(os.path.join("./", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
+
             else:
                 shutil.make_archive(os.path.join("./", "output_user_%s" % self.user_id.text()), 'zip', "./output/")
         except Exception as e:
