@@ -2,12 +2,22 @@
 
 block_cipher = None
 
+# Please configure below ###############################
+username = "user"
+python_path = 'C:/Users/%s/.conda/envs/pafe_app/libs'%username
+python_package_path = 'C:/Users/%s/.conda/envs/pafe_app/Lib/site-packages'%username
+python_cv2_path = 'C:/Users/%s/.conda/envs/pafe_app/Lib/site-packages/cv2'
+vlc_path = 'C:/Program Files/VideoLAN/VLC/'
+vlc_plugins_path = "C:/Program Files/VideoLAN/VLC/plugins/*"
+app_icon_path = "./resources/nmsl_logo_yellow.ico"
+########################################################
+
 
 a = Analysis(['main.py'],
-             pathex=['C:\\Python\\3.7\\Lib\\site-packages', 'C:\\Users\\terry\\PycharmProjects\\OnlineExperiment', 'C:/Program Files/VideoLAN/VLC/'],
-             binaries=[("C:/Program Files/VideoLAN/VLC/plugins/*", "plugins")],
+             pathex=[python_path, python_package_path, python_cv2_path, vlc_path],
+             binaries=[(vlc_plugins_path, "plugins")],
              datas=[('./resources/libvlc.dll', '.'), ('./resources/axvlc.dll', '.'), ('./resources/libvlccore.dll', '.'), ('./resources/npvlc.dll', '.')],
-             hiddenimports=[],
+             hiddenimports=["pynput.keyboard._win32", "pynput.mouse._win32"],
              hookspath=[],
              runtime_hooks=[],
              excludes=[],
@@ -19,7 +29,7 @@ pyz = PYZ(a.pure, a.zipped_data,
              cipher=block_cipher)
 exe = EXE(pyz,
           a.scripts,
-          a.binaries + [("libVLC.dll", "C:/Program Files/VideoLAN/VLC/libvlc.dll", "BINARY")],
+          a.binaries + [("libVLC.dll", vlc_path+"libvlc.dll", "BINARY")],
           a.zipfiles,
           a.datas,
           [],
@@ -31,4 +41,4 @@ exe = EXE(pyz,
           upx_exclude=[],
           runtime_tmpdir=None,
           console=False,
-          icon="./resources/nmsl_logo_yellow.ico")
+          icon=app_icon_path)

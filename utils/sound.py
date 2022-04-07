@@ -1,5 +1,4 @@
 import playsound
-import sys
 
 
 def play(url: str):
@@ -10,15 +9,11 @@ def play(url: str):
     :param url:
     :return:
     """
-    if sys.platform is 'win32':
-        import winsound
-        winsound.PlaySound(url, winsound.SND_ASYNC | winsound.SND_ALIAS)
-    else:
+    try:
+        playsound.playsound(url, False)
+    except Exception as e:
+        print(e)
         try:
-            playsound.playsound(url, False)
+            playsound.playsound(url, True)
         except Exception as e:
             print(e)
-            try:
-                playsound.playsound(url, True)
-            except Exception as e:
-                print(e)

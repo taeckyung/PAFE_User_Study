@@ -7,7 +7,7 @@ from PyQt5.QtGui import *
 from pynput import mouse, keyboard
 import cv2
 
-from multiprocessing import Process, Event, freeze_support, SimpleQueue, Value
+from multiprocessing import Event, freeze_support, SimpleQueue, Value
 from imutils import face_utils
 from threading import Thread
 from enum import Enum, auto
@@ -23,7 +23,8 @@ import os
 
 from typing import List, Tuple
 
-from utils import vlc, camera, sound, notification
+from utils import vlc, camera, sound, notification, parsing
+
 
 def getResource(name):
     if sys.platform=="darwin":
@@ -150,7 +151,6 @@ class ProbeRunner(QThread):
 
             # Play ding sound
             if (time_now - padding) // interval > idx_before:
-                #sound.play("./resources/Ding-sound-effect.mp3")
                 sound.play(getResource("Ding-sound-effect.mp3"))
                 output_str += "%f,%f,sound\n" % (time_now, clock_now)
                 idx_before += 1
@@ -219,8 +219,6 @@ class VideoRecorder(Thread):
 
     def run(self) -> None:
         self.output = open("./output/video_timeline.txt", 'w', buffering=1, encoding='UTF-8')
-        #signal.signal(signal.SIGINT, self.signal_handler)
-        #signal.signal(signal.SIGTERM, self.signal_handler)
         if sys.platform=="darwin":
             self.video_cap = cv2.VideoCapture(self.cam)
         else:
@@ -320,15 +318,12 @@ class ActivityRecorder(Thread):
         if isinstance(key, keyboard.KeyCode):
             if key in [keyboard.KeyCode.from_char('f'), keyboard.KeyCode.from_char('F'), keyboard.KeyCode.from_char('ㄹ')]:
                 self.queue.put((curr_time, 'y'))
-                #sound.play("./resources/Keyboard.mp3")
                 sound.play(getResource("Keyboard.mp3"))
             elif key in [keyboard.KeyCode.from_char('n'), keyboard.KeyCode.from_char('N'), keyboard.KeyCode.from_char('ㅜ')]:
                 self.queue.put((curr_time, 'n'))
-                #sound.play("./resources/Keyboard.mp3")
                 sound.play(getResource("Keyboard.mp3"))
         elif key == keyboard.Key.space:
             self.queue.put((curr_time, 'p'))
-            #sound.play("./resources/Keyboard.mp3")
             sound.play(getResource("Keyboard.mp3"))
 
     def run(self) -> None:
@@ -528,23 +523,19 @@ class ExpApp(QMainWindow):
         # taskbar.hide_taskbar()
 
         # Debugging options (Disable camera setting & calibration)
-        self._skip_camera = False
-        self._skip_calib = False
+        self._skip_camera = True
+        self._skip_calib = True
 
+        ########### MODIFY HERE! ######################################
         self.videos = [
-            #("Pre-video", "./resources/pre-video.webm"),
-            #("Main-video", "./resources/main-video.webm"),
-            ("Pre-video", getResource("pre-video.webm")),
-            ("Main-video", getResource("main-video.webm")),
-            # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
-            # ("5-Second-Timer", "https://www.youtube.com/watch?v=l-VoReTNT1A", "https://forms.gle/fsq9JoA3uQW1XVsL8"),
-            # ("Writing-in-the-Sciences",     "https://youtu.be/J3p6wGzLi00", "https://forms.gle/fsq9JoA3uQW1XVsL8"),  # 11m; pre-video
-            # ("Intro-to-Forensic-Science",   "https://youtu.be/FmPBNPFwiws", "https://forms.gle/DBgafv1NRG6PbRuh8"),  # 12m
-            # ("Intro-to-Economic-Theories",  "https://youtu.be/8yM_vw9xKnQ", "https://forms.gle/BL1siLNCM5WaaLWm8"),  # 12m
-            # ("AI-For-Everyone",             "https://youtu.be/bBaZ05WsTUM", "https://forms.gle/1cLrxunMHAXBktVL8"),  # 11m
-            # ("Game-Theory",                 "https://youtu.be/o5vvcohd1Qg", "https://forms.gle/83ixrQgC86xczpfV8"),  # 10m
-            # ("Cryptography-I",              "https://youtu.be/XnueMv0EUHQ", "https://forms.gle/t28mL8xmZSabigSe9")   # 15m
+            # Convention:
+            # File: (VIDEO_TITLE, getResource(VIDEO_PATH))
+            # Youtube: (VIDEO_TITLE, getResource(YOUTUBE_URL))
+            ("Pre-video", "https://www.youtube.com/watch?v=ElnxAu6X_s4"),
+            ("Main-video", "https://www.youtube.com/watch?v=ElnxAu6X_s4"),
         ]
+        ###############################################################
+
         self.videoIndex = 0
 
         self.output = open("output/main_log.txt", 'w', buffering=1, encoding='UTF-8')
@@ -662,7 +653,7 @@ class ExpApp(QMainWindow):
                 noti_open.setFixedSize(758, 50)
                 noti_open.clicked.connect(notification.open_settings)
 
-                type_student_id_text = QLabel('Type your Phone Number below.')
+                type_student_id_text = QLabel('Type your Participation ID below.')
                 type_student_id_text.setFixedHeight(75)
 
                 self.user_id = QLineEdit(self)
@@ -1205,8 +1196,8 @@ class ExpApp(QMainWindow):
         self.probeRunner.signal.connect(self.showDialog)
         self.probeRunner.ui_signal.connect(self.updater.alertProbeRunnerFinished)
 
-        #url = parsing.get_best_url(self.videos[self.videoIndex][1])
-        url = self.videos[self.videoIndex][1]
+        url = parsing.get_best_url(self.videos[self.videoIndex][1])
+        # url = self.videos[self.videoIndex][1]
         self.log("url,%s" % url)
         try:
             media = self.instance.media_new(url)
