@@ -1,11 +1,14 @@
 import cv2
-import os
+import os, sys
 
 
 def select_camera(path="test.png"):
     port_list = []
     for i in range(10):
-        cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
+        if sys.platform == "darwin":
+            cap = cv2.VideoCapture(i)
+        else:
+            cap = cv2.VideoCapture(i, cv2.CAP_DSHOW)
         try:
             success = 0
             if cap.isOpened():
