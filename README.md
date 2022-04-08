@@ -17,9 +17,9 @@ We tested our codes under this environment:
 
 2. We use [Conda environment](https://docs.conda.io/).
 
-   1. You can get Conda by installing [Anaconda](https://www.anaconda.com/) first. 
+   1. You can get Conda by installing [Anaconda](https://www.anaconda.com/). Skip if you already have Conda installed. 
    
-   2. We share our python environment that contains all required python packages. Please refer to the `./pafe_app.yaml` file.
+   2. We share our Conda environment that contains all Python packages, at `./pafe_app.yaml` file.
    
    3. You can import our environment using Conda:
 
@@ -27,27 +27,33 @@ We tested our codes under this environment:
 
    Reference: https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-from-an-environment-yml-file
 
-3. (Optional) If you plan to use Youtube links, install a modified version of pafy, which retrieves Youtube URLs.
+3. (Optional) If you plan to use Youtube links, install a modified version of Pafy, which retrieves Youtube URLs. Existing public version of Pafy is outdated.
    > $ pip install git+https://github.com/Cupcakus/pafy
 
 
 ## How to Compile an Executable
-! We are currently fixing the bug that libraries are not properly linked.
 
 1. Please check configurations (e.g., paths) in `main.spec`.
 2. Run main.spec:
 > $ pyinstaller main.spec
-3. Locate `./dist/main.exe` for the output.
+3. Copy your `./resources` folder into `./dist` folder (`./dist/resources`)
+4. You can compress the entire `./dist` folder, move it to any Windows machine, and execute `main.exe`.
 
 
 
 ## How to Customize
-- Most of the configurations are done in `./main.py`, while compiling options are configured in `./main.spec`.
-- (Example) Modify video URL (local file / URL): `Line #529 at ./main.py`
+- Most of the configurations are done in `./main.py` while compiling options are configured in `./main.spec`.
+- (Example) Modify video URL (local file URI / Youtube link): `Line #529 at ./main.py`
   - Initial version includes one demo video and one main video. 
-  - The only difference is that if you do not respond to the ding sound in the demo video, it will stop running the video.  However, the main video will not stop even if you do not respond.
-  - If you use local file, your file location should be located in the `./resources` folder.
+  - The demo video stops and warns if a participant does not respond to the probing sound. However, the main video does not stop.
+  - If you use a local file URI, your file location should be located in the `./resources` folder (as well as copied `./dist/resouces` folder).
 
+
+## License
+- This project is licensed under the terms of the MIT license.
+- `./utils/vlc.py` follows its own license.
+- Media (ding sound, keyboard sound) in the `./resources` folder are from https://freesound.org/, with [Creative Commons 0 License](https://creativecommons.org/publicdomain/zero/1.0/).
+- Roboto font is licensed under the [Apache License, Version 2.0](http://www.apache.org/licenses/LICENSE-2.0).
 
 ## Citation
 
