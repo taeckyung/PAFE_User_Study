@@ -523,14 +523,14 @@ class ExpApp(QMainWindow):
         # taskbar.hide_taskbar()
 
         # Debugging options (Disable camera setting & calibration)
-        self._skip_camera = True
-        self._skip_calib = True
+        self._skip_camera = False
+        self._skip_calib = False
 
         ########### MODIFY HERE! ######################################
         self.videos = [
             # Convention:
             # File: (VIDEO_TITLE, getResource(VIDEO_PATH))
-            # Youtube: (VIDEO_TITLE, getResource(YOUTUBE_URL))
+            # Youtube: (VIDEO_TITLE, YOUTUBE_URL)
             ("Pre-video", "https://www.youtube.com/watch?v=ElnxAu6X_s4"),
             ("Main-video", "https://www.youtube.com/watch?v=ElnxAu6X_s4"),
         ]
